@@ -1,0 +1,17 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# Capacitor 原生工程在 CI 中按需生成（cap add android），不入库
+/android
+/ios
+
+# 日志与编辑器
+*.log
+npm-debug.log*
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

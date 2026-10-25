@@ -1,0 +1,34 @@
+{
+  "name": "cinedesk",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "影视大全 - 无广告、多源聚合的在线影视搜索与观看 App",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "gen:icon": "node scripts/gen-icon.mjs",
+    "cap:add": "cap add android",
+    "cap:sync": "npm run build && cap sync android",
+    "apk:debug": "npm run build && cap sync android && cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/core": "^7.4.3",
+    "@capacitor/preferences": "^7.0.4",
+    "hls.js": "^1.6.15",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.9.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.3",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.1",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "^5.9.3",
+    "vite": "^6.3.6"
+  }
+}
