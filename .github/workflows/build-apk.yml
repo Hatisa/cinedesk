@@ -32,6 +32,22 @@ jobs:
 
       - name: 配置 Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # 显式装好编译 Capacitor 7 所需的 SDK 组件。
+          # 不预装的话 Gradle 会在构建时临时下载，容易因许可协议
+          # 或网络问题直接失败，且报错信息很不直观。
+          packages: 'platforms;android-35 build-tools;35.0.0 platform-tools'
+
+      - name: 打印构建环境
+        run: |
+          echo "---- Java ----"
+          java -version 2>&1 || true
+          echo "---- Android SDK ----"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<未设置>}"
+          echo "ANDROID_HOME=${ANDROID_HOME:-<未设置>}"
+          echo "---- Node / npm ----"
+          node -v
+          npm -v
 
       - name: 安装依赖
         run: npm ci
@@ -61,11 +77,41 @@ jobs:
           fi
           grep -n 'usesCleartextTraffic' "$MANIFEST"
 
+      # 全程落盘到 build-log.txt，并把输出同时打到日志里。
+      # 这样一旦编译失败，错误原因会直接显示在这一步的日志中，
+      # 不需要再去猜是哪一环出的问题。
+      #
+      # set -o pipefail 不能省：GitHub Actions 默认只开 -e，
+      # 管道的退出码取最后一个命令（tee），会把编译失败误报成成功。
       - name: 编译 Debug APK
         working-directory: android
         run: |
+          set -o pipefail
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build-log.txt
+
+      - name: 失败时回显错误摘要
+        if: failure()
+        run: |
+          LOG=android/build-log.txt
+          if [ -f "$LOG" ]; then
+            echo "## ❌ 构建失败，以下是关键错误" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            grep -iE "error|failed|exception|could not|unsupported|no such" "$LOG" | tail -40 >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "---- 日志末尾 60 行 ----"
+            tail -60 "$LOG"
+          else
+            echo "未生成 build-log.txt，失败发生在编译之前的步骤"
+          fi
+
+      - name: 失败时保存构建日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: android/build-log.txt
+          if-no-files-found: ignore
 
       - name: 记录 APK 信息
         run: |
