@@ -113,14 +113,7 @@ img {
 
 /* ============ 页面骨架 ============ */
 .page {
-  /*
-   * 顶部留白分两层：
-   *   var(--safe-t) —— 系统报告的安全区（刘海、挖孔）。原生侧已通过
-   *     capacitor.config.ts 的 adjustMarginsForEdgeToEdge 给 WebView 让出了
-   *     状态栏，此时这里通常为 0；保留是为了兼容个别仍会报告安全区的机型。
-   *   16px —— 与状态栏之间的视觉呼吸，太少会让标题贴住状态栏边缘。
-   */
-  padding: calc(var(--safe-t) + 16px) 14px calc(var(--nav-h) + var(--safe-b) + 20px);
+  padding: calc(var(--safe-t) + 12px) 14px calc(var(--nav-h) + var(--safe-b) + 20px);
   max-width: 780px;
   margin: 0 auto;
 }
@@ -927,8 +920,7 @@ img {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* 比其他页面再收一点：播放页顶栏浮在画面上，留白过多会压住内容 */
-  padding: calc(var(--safe-t) + 14px) 12px 10px;
+  padding: calc(var(--safe-t) + 8px) 12px 8px;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.75), transparent);
   z-index: 5;
 }

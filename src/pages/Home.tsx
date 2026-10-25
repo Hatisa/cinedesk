@@ -21,14 +21,18 @@ import { useApp } from '../state/AppState';
 export default function Home() {
   const nav = useNavigate();
   const toast = useToast();
-  const { sources, health, settings, persistHealth, ready } = useApp();
+  const { sources, health, settings, persistHealth, ready, search, setSearch } = useApp();
 
-  const [keyword, setKeyword] = useState('');
-  const [items, setItems] = useState<AggregatedItem[]>([]);
-  const [statuses, setStatuses] = useState<SourceStatus[]>([]);
+  /*
+   * 搜索状态从全局快照初始化：从详情页返回时组件会重新挂载，
+   * 用快照把关键词、结果列表、进度文案原样恢复，用户看到的还是离开时的样子。
+   */
+  const [keyword, setKeyword] = useState(search?.keyword ?? '');
+  const [items, setItems] = useState<AggregatedItem[]>(search?.items ?? []);
+  const [statuses, setStatuses] = useState<SourceStatus[]>(search?.statuses ?? []);
   const [searching, setSearching] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [totalMs, setTotalMs] = useState(0);
+  const [searched, setSearched] = useState(search !== null);
+  const [totalMs, setTotalMs] = useState(search?.totalMs ?? 0);
   const [recent, setRecent] = useState<string[]>([]);
   const [trending, setTrending] = useState<TrendingMap>(FALLBACK_TRENDING);
   const [trendTab, setTrendTab] = useState<TrendingTab>('movie');
@@ -74,6 +78,8 @@ export default function Home() {
       setStatuses([]);
       setTotalMs(0);
       setRecent((prev) => [kw, ...prev.filter((k) => k !== kw)].slice(0, 8));
+      // 新搜索开始，旧快照立即作废，避免中途返回时闪出上一轮的结果
+      setSearch(null);
 
       const res = await searchAll(kw, {
         sources,
@@ -100,12 +106,17 @@ export default function Home() {
       setTotalMs(res.totalMs);
       setSearching(false);
       persistHealth();
+      /*
+       * 存快照：进详情页时 Home 会整体卸载，组件内 state 随之销毁；
+       * 返回时组件重新挂载，用这份快照把搜索结果原样恢复出来。
+       */
+      setSearch({ keyword: kw, items: res.items, statuses: res.statuses, totalMs: res.totalMs });
 
       if (!res.items.length) {
         toast(`${activeCount} 个源都没搜到「${kw}」`);
       }
     },
-    [sources, health, settings.timeoutMs, persistHealth, toast, activeCount],
+    [sources, health, settings.timeoutMs, persistHealth, toast, activeCount, setSearch],
   );
 
   const openDetail = (item: AggregatedItem) => {

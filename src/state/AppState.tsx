@@ -15,6 +15,7 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  type AggregatedItem,
   DEFAULT_SETTINGS,
   HealthStore,
   KEYS,
@@ -33,7 +34,16 @@ import {
   type HistoryEntry,
   type Settings,
   type SourceConfig,
+  type SourceStatus,
 } from '../core';
+
+/** 一次搜索的完整快照：从详情页返回首页时用它恢复搜索结果 */
+export interface SearchSnapshot {
+  keyword: string;
+  items: AggregatedItem[];
+  statuses: SourceStatus[];
+  totalMs: number;
+}
 
 interface AppState {
   ready: boolean;
@@ -42,6 +52,9 @@ interface AppState {
   history: HistoryEntry[];
   favorites: FavoriteEntry[];
   settings: Settings;
+  /** 最近一次搜索的快照；null 表示当前没有可恢复的结果 */
+  search: SearchSnapshot | null;
+  setSearch: (s: SearchSnapshot | null) => void;
   setSources: (next: SourceConfig[]) => void;
   addSource: (src: Omit<SourceConfig, 'builtin'>) => void;
   updateSource: (key: string, patch: Partial<SourceConfig>) => void;
@@ -65,6 +78,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [favorites, setFavorites] = useState<FavoriteEntry[]>([]);
   const [settings, setSettingsState] = useState<Settings>(DEFAULT_SETTINGS);
+  const [search, setSearchState] = useState<SearchSnapshot | null>(null);
   const healthRef = useRef(new HealthStore());
 
   // 启动时从本地存储恢复
@@ -144,6 +158,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void saveJSON(KEYS.sources, next);
   }, []);
 
+  /*
+   * 记录最近一次搜索的快照。
+   *
+   * Home 组件在路由切换（进详情页）时会卸载，仅靠组件内 useState 结果就丢了，
+   * 返回时用户会看到搜索前的首页——这里把结果提到全局，返回时原样恢复。
+   */
+  const setSearch = useCallback((s: SearchSnapshot | null) => {
+    setSearchState(s);
+  }, []);
+
   const setSettings = useCallback((patch: Partial<Settings>) => {
     setSettingsState((prev) => {
       const next = { ...prev, ...patch };
@@ -199,6 +223,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       history,
       favorites,
       settings,
+      search,
+      setSearch,
       setSources,
       addSource,
       updateSource,
@@ -214,9 +240,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       resetHealth,
     }),
     [
-      ready, sources, history, favorites, settings, setSources, addSource, updateSource,
-      removeSource, resetSources, setSettings, rememberPlay, removeHistory, clearHistory,
-      toggleFav, isFavorite, persistHealth, resetHealth,
+      ready, sources, history, favorites, settings, search, setSearch, setSources, addSource,
+      updateSource, removeSource, resetSources, setSettings, rememberPlay, removeHistory,
+      clearHistory, toggleFav, isFavorite, persistHealth, resetHealth,
     ],
   );
 
