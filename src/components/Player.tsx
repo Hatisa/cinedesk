@@ -8,8 +8,9 @@
  * 原生平台上的媒体请求同样走 CapacitorHttp 配置的原生通道，
  * 不受 Referer / CORS 限制——实测部分源必须带 Referer 才返回 200。
  */
-import Hls, { FetchLoader } from 'hls.js';
+import Hls from 'hls.js';
 import { useEffect, useRef, useState } from 'react';
+import { NativeHttpLoader } from '../core';
 
 interface Props {
   src: string;
@@ -50,6 +51,12 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
     const isHls = /\.m3u8(\?|#|$)/i.test(src);
 
     let hls: Hls | null = null;
+    // 致命错误只自愈一次：无限重试会让界面永远停在「正在缓冲」，无法触发换源
+    let networkRetried = 0;
+    let mediaRetried = 0;
+    /** manifest 是否已成功解析，作为超时兜底的判据 */
+    let started = false;
+    let watchdog = 0;
 
     const applyStart = () => {
       if (startAt > 1 && Number.isFinite(video.duration) && startAt < video.duration - 5) {
@@ -58,6 +65,7 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
     };
 
     const fail = (msg: string) => {
+      window.clearTimeout(watchdog);
       setState('error');
       setMessage(msg);
       cbRef.current.onError?.(msg);
@@ -68,18 +76,21 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
         enableWorker: true,
         lowLatencyMode: false,
         /*
-         * 必须显式指定 FetchLoader。
+         * 必须用自定义的 NativeHttpLoader，不能用 hls.js 自带的 FetchLoader。
          *
-         * hls.js 默认用 XMLHttpRequest 拉取分片，而 Capacitor 对 XHR 的拦截
-         * 在 responseType='arraybuffer' 时把原生返回的 base64 字符串直接赋给
-         * xhr.response —— 类型与 hls.js 期望的 ArrayBuffer 不符，Android 上
-         * 会直接播放失败。
+         * 启用 CapacitorHttp 后 window.fetch 被打补丁，跨域请求会改写成
+         * https://localhost/_capacitor_http_interceptor_?u=<原始地址>，再由
+         * WebView 拦截交给原生 OkHttp。由于拦截发生在原生层，响应无法告知
+         * WebView 真正的来源，response.url 恒等于那个 localhost 代理地址。
          *
-         * FetchLoader 走 window.fetch：Capacitor 会把外部 URL 转成代理 URL，
-         * 由 WebViewClient.shouldInterceptRequest 交给 OkHttp 拉取并以二进制
-         * WebResourceResponse 返回，数据完好无损。
+         * 而资源站的 master playlist 写的是相对路径（如 /play/hls/x/index.m3u8），
+         * hls.js 以 response.url 为基准解析，结果会指向 localhost 的本地文件
+         * 服务器，永远取不到数据 —— 表现为搜索正常、播放一直缓冲。
+         *
+         * NativeHttpLoader 直接走 CapacitorHttp 插件（与搜索同一条原生通道），
+         * 并把 url 固定为真实地址，相对路径才能正确解析。详见 core/hlsLoader.ts。
          */
-        loader: FetchLoader,
+        loader: NativeHttpLoader,
         // 分片失败自动重试，源站偶发抖动不至于直接中断播放
         manifestLoadingMaxRetry: 4,
         manifestLoadingRetryDelay: 600,
@@ -92,22 +103,33 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
       hls.loadSource(src);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        started = true;
+        window.clearTimeout(watchdog);
         applyStart();
         if (autoPlay) void video.play().catch(() => undefined);
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (!data.fatal) return;
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          // 网络类错误先尝试自愈：换源前再给它一次机会
+        /*
+         * 致命错误只自愈一次：无限重试会让界面永远停在「正在缓冲」，
+         * 必须把错误上报给上层，才能触发自动换源。
+         */
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetried < 1) {
+          networkRetried += 1;
           hls?.startLoad();
           return;
         }
-        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetried < 1) {
+          mediaRetried += 1;
           hls?.recoverMediaError();
           return;
         }
         fail('该线路无法播放，请切换其他来源');
       });
+      // 兜底：manifest 迟迟解析不出来也要给出反馈，不能一直转圈
+      watchdog = window.setTimeout(() => {
+        if (!started) fail('该线路响应超时，请切换其他来源');
+      }, 20000);
     } else if (video.canPlayType('application/vnd.apple.mpegurl') && isHls) {
       // iOS Safari 原生支持 HLS
       video.src = src;
@@ -124,6 +146,7 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
     }
 
     return () => {
+      window.clearTimeout(watchdog);
       hls?.destroy();
       video.removeAttribute('src');
       video.load();

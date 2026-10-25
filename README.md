@@ -106,9 +106,39 @@ src/
 
 ### 一个必须在 Android 上绕开的坑
 
-hls.js 默认用 `XMLHttpRequest` 拉取分片，而 Capacitor 对 XHR 的拦截实现在 `responseType='arraybuffer'` 时，会把原生返回的 **base64 字符串**直接赋给 `xhr.response`——类型与 hls.js 期望的 `ArrayBuffer` 不符，**在 Android 上会直接播放失败**（浏览器里却完全正常，很难察觉）。
+这是本项目最隐蔽的一个问题，表现为：**搜索一切正常，但点播放后一直停在「正在缓冲」**。
 
-因此 `Player.tsx` 显式指定了 `loader: FetchLoader`。它走 `window.fetch`：Capacitor 把外部 URL 转成代理 URL，由 `WebViewClient.shouldInterceptRequest` 交给 OkHttp 拉取，再以**二进制** `WebResourceResponse` 返回，分片数据完好无损。
+根因在 hls.js 解析播放列表时的**相对地址基准**上。
+
+启用 `CapacitorHttp` 后，Capacitor 会给 `window.fetch` 打补丁：跨域请求被改写成
+
+```
+https://localhost/_capacitor_http_interceptor_?u=<原始地址>
+```
+
+再由 WebView 的 `shouldInterceptRequest` 交给原生 OkHttp 拉取。问题在于**拦截发生在原生层**——WebView 只知道"我请求的是 localhost 上这个代理地址"，无法得知响应真正来自哪个站点，于是 `response.url` 恒等于那个代理地址。
+
+而 hls.js 恰恰用 `response.url` 作为解析 m3u8 内相对路径的基准（`getResponseUrl` → `new URL(uri, baseUrl)`）。绝大多数资源站的 master playlist 写的正是相对路径：
+
+```
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=4096000,RESOLUTION=1920x1080
+/play/hls/xxxx/index.m3u8
+```
+
+基准一旦变成 localhost，解析结果就成了 `https://localhost/play/hls/...`，请求打到 WebView 的本地文件服务器上，永远取不到数据，只能反复重试——也就是"一直缓冲"。
+
+> 这个坑在桌面浏览器里完全复现不出来（那里没有 fetch 补丁），只在 APK 里发作。
+
+因此 `src/core/hlsLoader.ts` 提供了自定义的 `NativeHttpLoader`，`Player.tsx` 通过 `loader: NativeHttpLoader` 使用它：
+
+| 要点 | 做法 |
+|---|---|
+| 走哪条通道 | 直接用 `CapacitorHttp` 插件——也就是搜索功能正在用的那条原生通道 |
+| 相对地址基准 | 把 `LoaderResponse.url` 固定为 `context.url`（真实地址），不依赖被改写的 `response.url` |
+| 二进制数据 | 原生侧 `arraybuffer` 返回的是 base64 字符串，在 `toArrayBuffer()` 里解码回 `ArrayBuffer` |
+| 卡死兜底 | 自定义 loader 会按 `loadPolicy` 自行调度超时；播放器另有 20 秒 watchdog，超时即上报错误以触发自动换源 |
+
+另外，播放器对致命错误**只自愈一次**（网络错误 `startLoad()`、媒体错误 `recoverMediaError()` 各一次）。早期版本是无条件重试，结果永远走不到"上报失败"这一步，导致自动换源无法触发，界面也就永远停在了缓冲状态。
 
 ### 为什么"稳定"
 

@@ -8,3 +8,4 @@ export * from './health';
 export * from './store';
 export * from './aggregate';
 export * from './cache';
+export * from './hlsLoader';
