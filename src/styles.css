@@ -414,6 +414,14 @@ img {
   background-position: center;
   filter: blur(26px) brightness(0.42);
   transform: scale(1.15);
+  /*
+   * 这是纯装饰的模糊海报背景。它虽然是绝对定位，但当海报较高时
+   * （height 210px 加上 scale 1.15）会溢出 .detail-hero，覆盖到下方的
+   * .btn-row；而绝对定位元素的绘制层级高于静态元素，「播放」「收藏」
+   * 就点不动了。关掉指针事件即可，视觉不受影响。
+   */
+  pointer-events: none;
+  z-index: 0;
 }
 
 .detail-top {

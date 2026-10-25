@@ -20,6 +20,8 @@ export default function Play() {
   /** 已自动尝试失败的来源，避免死循环 */
   const [failedSources, setFailedSources] = useState<string[]>([]);
   const [showPicker, setShowPicker] = useState(false);
+  /** 按片名重新搜索后确实没有这个条目，用来区分「还在搜」与「搜不到」 */
+  const [notFound, setNotFound] = useState(false);
 
   const name = sp.get('name') || item?.name || '';
 
@@ -32,7 +34,15 @@ export default function Play() {
       putItems(res.items);
       persistHealth();
       if (!alive) return;
-      setItem(res.items.find((i) => i.key === key) ?? res.items[0] ?? null);
+      /*
+       * 只接受精确匹配，绝不能回退到 res.items[0]。
+       * key 由片名归一化而来，匹配不到就说明这个片名在当前源里已经没有了；
+       * 此时随便挑第一条会播出一部毫不相干的影片。
+       */
+      const hit = res.items.find((i) => i.key === key) ?? null;
+      setItem(hit);
+      // 搜索已经结束且确实没有这个条目：要显示「未找到」，而不是一直转圈
+      setNotFound(!hit);
     })();
     return () => {
       alive = false;
@@ -81,11 +91,28 @@ export default function Play() {
   };
 
   if (!item) {
+    // 还在搜索 → 转圈；已搜完且没有 → 明确报未找到，避免一直转圈
+    if (!notFound) {
+      return (
+        <div className="player-page">
+          <div className="empty" style={{ margin: 'auto' }}>
+            <div className="spinner" style={{ margin: '0 auto 12px' }} />
+            <div>正在获取播放地址…</div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="player-page">
+        <div className="player-bar">
+          <button className="icon-btn" onClick={() => nav(-1)} aria-label="返回">
+            <BackIcon />
+          </button>
+        </div>
         <div className="empty" style={{ margin: 'auto' }}>
-          <div className="spinner" style={{ margin: '0 auto 12px' }} />
-          <div>正在获取播放地址…</div>
+          <div className="empty-icon">📭</div>
+          <div>未找到「{name}」</div>
+          <div className="hint">该片名在当前资源源里已不存在，请返回重新搜索</div>
         </div>
       </div>
     );

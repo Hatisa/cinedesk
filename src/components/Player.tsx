@@ -40,6 +40,19 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
   const cbRef = useRef({ onProgress, onError, onEnded });
   cbRef.current = { onProgress, onError, onEnded };
 
+  /*
+   * startAt 只能以 ref 读取，绝不能放进下面那个 effect 的依赖里。
+   *
+   * 原因是它会随着播放不断变大：播放 → 上报进度 → 上层写入历史 → history 变化
+   * → 上层重新算出新的 startAt（5.1 → 5.2 → …）→ 依赖变化 → effect 重跑
+   * → hls.destroy() 并重建播放器 → 位置归零 → 又从头播 → 再次上报……
+   *
+   * 表现出来就是「刚出画面就回到缓冲，并且总是重新开头」，永远播不过几秒。
+   * 续播位置只在加载新地址时需要读一次，所以用 ref 传递最新值即可。
+   */
+  const startAtRef = useRef(startAt);
+  startAtRef.current = startAt;
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !src) return;
@@ -59,8 +72,9 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
     let watchdog = 0;
 
     const applyStart = () => {
-      if (startAt > 1 && Number.isFinite(video.duration) && startAt < video.duration - 5) {
-        video.currentTime = startAt;
+      const at = startAtRef.current;
+      if (at > 1 && Number.isFinite(video.duration) && at < video.duration - 5) {
+        video.currentTime = at;
       }
     };
 
@@ -151,18 +165,46 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
       video.removeAttribute('src');
       video.load();
     };
-  }, [src, startAt, autoPlay]);
+    /*
+     * 依赖里刻意不含 startAt：它随播放进度不断变大，一旦进入依赖就会导致
+     * 播放器被反复销毁重建（症状是刚出画面就回缓冲、并且总是重新开头）。
+     * 续播位置通过 startAtRef 读取，见上方注释。
+     */
+  }, [src, autoPlay]);
 
   // 进度上报，用于续播与历史记录
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    let last = 0;
+    /*
+     * 位置一律取自这里缓存的值，而不是直接读 video.currentTime。
+     *
+     * 原因是卸载时的时序：上面那个 effect 的清理会执行 video.load()，
+     * 把 currentTime 归零；若此时再去读实时值，就会把 0 写进观看历史，
+     * 续播位置随之丢失。而 timeupdate 大约每 250ms 触发一次，页面切到
+     * 后台时它会停住，缓存里留下的正好是切走前的位置，正是续播要用的值。
+     */
+    let pos = 0;
+    let dur = 0;
+    const track = () => {
+      pos = video.currentTime;
+      dur = video.duration;
+    };
+    const report = () => {
+      if (Number.isFinite(dur) && dur > 0) cbRef.current.onProgress?.(pos, dur);
+    };
+    /*
+     * last 以「当前时刻」为起点，而不是 0。若写成 0，首次 timeupdate 就会满足
+     * now - 0 >= 5000 而立刻上报一次，等于刚起播就写了一条 position≈0 的
+     * 历史记录，把上一次的续播位置覆盖掉。
+     */
+    let last = Date.now();
     const onTime = () => {
+      track();
       const now = Date.now();
       if (now - last < 5000) return;
       last = now;
-      if (Number.isFinite(video.duration)) cbRef.current.onProgress?.(video.currentTime, video.duration);
+      report();
     };
     const onCanPlay = () => setState('playing');
     const onWaiting = () => setState('loading');
@@ -174,17 +216,17 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
     video.addEventListener('playing', onPlaying);
     video.addEventListener('waiting', onWaiting);
     video.addEventListener('ended', onEnd);
-    // 页面隐藏前落一次进度，避免退出丢进度
+    // 页面隐藏前落一次进度，避免退出丢进度（此时播放器仍在，可读实时值）
     const onHide = () => {
-      if (Number.isFinite(video.duration)) {
-        cbRef.current.onProgress?.(video.currentTime, video.duration);
-      }
+      track();
+      report();
     };
     document.addEventListener('visibilitychange', onHide);
     window.addEventListener('pagehide', onHide);
 
     return () => {
-      onHide();
+      // 只上报缓存位置：此刻 video 可能已被 load() 归零，读实时值会写成 0
+      report();
       video.removeEventListener('timeupdate', onTime);
       video.removeEventListener('canplay', onCanPlay);
       video.removeEventListener('playing', onPlaying);

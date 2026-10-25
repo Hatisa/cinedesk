@@ -30,7 +30,12 @@ export default function Detail() {
       putItems(res.items);
       persistHealth();
       if (!alive) return;
-      setItem(res.items.find((i) => i.key === key) ?? res.items[0] ?? null);
+      /*
+       * 只接受精确匹配，绝不能回退到 res.items[0]。
+       * key 由片名归一化而来，匹配不到就说明这个片名在当前源里已经没有了；
+       * 此时随便挑第一条会把用户带到一部毫不相干的影片上，比报「未找到」更糟。
+       */
+      setItem(res.items.find((i) => i.key === key) ?? null);
       setLoading(false);
     })();
     return () => {

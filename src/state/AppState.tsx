@@ -25,6 +25,7 @@ import {
   loadSettings,
   loadSources,
   pushHistory,
+  reconcileSources,
   saveJSON,
   toggleFavorite,
   type FavoriteEntry,
@@ -79,7 +80,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ]);
       if (!alive) return;
       healthRef.current = new HealthStore(health as Record<string, HealthRecord>);
-      setSourcesState(srcs);
+      /*
+       * 与当前内置清单对齐：设备里存的列表是安装当时的版本，内置清单改动
+       * （如下架某个源）不会自动生效。reconcileSources 会保留用户选择的自定义源，
+       * 同时让内置源跟随代码更新。
+       */
+      const merged = reconcileSources(srcs);
+      setSourcesState(merged);
+      void saveJSON(KEYS.sources, merged);
       setHistory(hist);
       setFavorites(favs);
       setSettingsState({ ...DEFAULT_SETTINGS, ...cfg });

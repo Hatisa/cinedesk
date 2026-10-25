@@ -40,7 +40,6 @@ const SEEDS: SourceSeed[] = [
   { key: 'yutu', name: '玉兔资源', api: 'https://apiyutu.com/api.php/provide/vod', detail: 'https://apiyutu.com' },
   { key: 'didi', name: '滴滴资源', api: 'https://api.ddapi.cc/api.php/provide/vod', detail: 'https://didizy.com' },
   { key: 'taohua', name: '桃花资源', api: 'https://thzy1.me/api.php/provide/vod', detail: 'https://thzy8.me' },
-  { key: 'souav', name: 'SouAV资源', api: 'https://api.souavzyw.net/api.php/provide/vod', detail: 'https://souavzyw.com' },
   { key: 'xiaojizy', name: '小鸡资源', api: 'https://api.xiaojizy.live/provide/vod', detail: 'https://xiaojizy.live' },
   { key: 'lebo', name: '乐播资源', api: 'https://lbapi9.com/api.php/provide/vod', detail: 'https://lbapi9.com' },
   { key: 'moduapi', name: '魔都动漫', api: 'https://caiji.moduapi.cc/api.php/provide/vod', detail: 'https://caiji.moduapi.cc' },
@@ -56,4 +55,24 @@ export const BUILTIN_SOURCES: SourceConfig[] = SEEDS.map((s) => ({
 /** 全新安装时的默认源列表（深拷贝，避免被后续修改污染） */
 export function defaultSources(): SourceConfig[] {
   return BUILTIN_SOURCES.map((s) => ({ ...s }));
+}
+
+/**
+ * 把本地存储里的源列表与当前内置清单对齐。
+ *
+ * 必须在启动时跑一次：设备上存的列表是安装当时的版本，之后内置清单若有变化
+ * （例如下架了某个不该收录的源），它不会自己更新。这里以代码里的清单为准，
+ * 同时保留用户的选择与自定义源，避免每次升级都把用户的配置重置掉：
+ *   - 内置源：名称与接口地址跟随清单更新，但保留用户设置的启用/停用状态；
+ *   - 已从清单移除的内置源：丢弃（用户当初并未主动添加它）；
+ *   - 用户自己添加的源（builtin 为 false）：原样保留。
+ */
+export function reconcileSources(stored: SourceConfig[]): SourceConfig[] {
+  const old = new Map(stored.map((s) => [s.key, s]));
+  const builtin = BUILTIN_SOURCES.map((d) => {
+    const prev = old.get(d.key);
+    return prev ? { ...d, enabled: prev.enabled } : { ...d };
+  });
+  const custom = stored.filter((s) => !s.builtin);
+  return [...builtin, ...custom];
 }
