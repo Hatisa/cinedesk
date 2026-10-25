@@ -1,18 +1,39 @@
+/*
+ * 设计基线参考 shadcn/ui 的深色主题 token（GitHub 上星标最高的 UI 组件库），
+ * 借鉴的是它的分层方法而不是照搬配色：
+ *   1) 背景分三层——页面底 / 浮动面 / 卡片面，靠明度差而不是描边来区分层级，
+ *      深色下这样才不会满屏灰线；
+ *   2) 描边用「白色低透明度」叠加而非固定灰色，换任何底色都自然；
+ *   3) 前景色分主体 / 次要 / 最弱三档，次要档保证 4.5:1 以上对比度。
+ * 本项目额外保留了影视类应用需要的蓝色强调色与金色评分色。
+ */
 :root {
-  --bg: #0b0e14;
-  --bg-soft: #131824;
-  --bg-card: #1a2030;
-  --line: #252c3d;
-  --text: #e8ecf4;
-  --text-dim: #8d97ac;
+  --bg: #0a0c10;
+  --bg-soft: #141821;
+  --bg-card: #1b2029;
+  --bg-raise: #232936;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --text: #f2f4f8;
+  --text-soft: #c2cad8;
+  --text-dim: #98a2b3;
+  --text-faint: #6b7488;
   --accent: #4c8dff;
-  --accent-soft: rgba(76, 141, 255, 0.14);
+  --accent-soft: rgba(76, 141, 255, 0.16);
+  --accent-line: rgba(76, 141, 255, 0.45);
   --danger: #ff5c6c;
   --ok: #34d399;
+  --gold: #ffcc55;
+  --gold-dim: #d8b26a;
   --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.5);
   --nav-h: 58px;
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 * {
@@ -31,6 +52,39 @@ body {
   font-size: 15px;
   line-height: 1.5;
   overscroll-behavior-y: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/*
+ * 键盘可达性。
+ * 移动端虽然以触摸为主，但外接键盘、蓝牙遥控器、以及部分机型的
+ * 「用 Tab 键浏览」开启后都需要看得见的焦点。:focus-visible 保证
+ * 只在键盘操作时显示焦点环，触摸点击不会留下难看的方框。
+ */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/*
+ * 尊重系统的「减弱动态效果」设置。
+ * 前庭功能障碍用户开启该选项后，持续动画会引起不适；
+ * 这里统一关掉动画但保留终态，功能不受影响。
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 #root,
@@ -96,6 +150,17 @@ img {
   border-radius: var(--radius);
   padding: 0 12px;
   height: 46px;
+  transition: border-color 0.16s var(--ease), background 0.16s var(--ease);
+}
+
+/*
+ * 聚焦状态用 :focus-within 提到容器上。
+ * 输入框本身去掉描边（否则会出现内外两层框），改由外层容器变亮来表达
+ * 「这里正在输入」，视觉上更整体。
+ */
+.search-bar:focus-within {
+  border-color: var(--accent);
+  background: var(--bg-card);
 }
 
 .search-bar svg {
@@ -111,10 +176,11 @@ img {
   outline: none;
   color: var(--text);
   height: 100%;
+  font-size: 15px;
 }
 
 .search-bar input::placeholder {
-  color: #5c6880;
+  color: var(--text-faint);
 }
 
 .search-clear {
@@ -122,6 +188,12 @@ img {
   font-size: 20px;
   line-height: 1;
   padding: 4px 6px;
+  border-radius: 50%;
+}
+
+.search-clear:active {
+  background: var(--line);
+  color: var(--text);
 }
 
 .btn-search {
@@ -133,10 +205,18 @@ img {
   font-weight: 600;
   flex: 0 0 auto;
   margin-left: 8px;
+  /* 主操作用强调色 + 投影，与次级按钮拉开层级 */
+  box-shadow: 0 2px 10px rgba(76, 141, 255, 0.28);
+  transition: transform 0.14s var(--ease), opacity 0.16s var(--ease);
+}
+
+.btn-search:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .btn-search:disabled {
   opacity: 0.45;
+  box-shadow: none;
 }
 
 .search-row {
@@ -152,17 +232,20 @@ img {
 }
 
 .chip {
-  padding: 6px 12px;
+  padding: 7px 13px;
   border-radius: 999px;
   background: var(--bg-soft);
   border: 1px solid var(--line);
-  color: var(--text-dim);
+  color: var(--text-soft);
   font-size: 13px;
+  transition: transform 0.14s var(--ease), background 0.16s var(--ease);
 }
 
 .chip:active {
   background: var(--accent-soft);
+  border-color: var(--accent-line);
   color: var(--text);
+  transform: scale(0.96);
 }
 
 /* ============ 搜索进度 ============ */
@@ -171,15 +254,23 @@ img {
   background: var(--bg-soft);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 11px 13px;
 }
 
 .progress-head {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
   font-size: 12.5px;
   color: var(--text-dim);
-  margin-bottom: 8px;
+  margin-bottom: 9px;
+}
+
+/* 结果条数用等宽数字，计数跳动时不会左右抖动 */
+.progress-head span:last-child {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 
 .progress-track {
@@ -192,7 +283,8 @@ img {
 .progress-fill {
   height: 100%;
   background: var(--accent);
-  transition: width 0.25s ease;
+  border-radius: 2px;
+  transition: width 0.25s var(--ease);
 }
 
 .src-chips {
@@ -217,7 +309,7 @@ img {
 }
 
 .src-chip.fail {
-  color: #6b7488;
+  color: var(--text-faint);
   text-decoration: line-through;
 }
 
@@ -256,15 +348,25 @@ img {
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-  gap: 12px 10px;
+  gap: 14px 10px;
 }
 
+/*
+ * 卡片用「按压缩放」而不是 hover 变色来反馈。
+ * 触屏上没有 hover 状态，用户手指按下时若毫无反应，会不确定是否点中；
+ * transform 缩放只触发合成层，比改颜色更省电也更顺滑。
+ */
 .vod-card {
   text-align: left;
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
+  transition: transform 0.14s var(--ease);
+}
+
+.vod-card:active {
+  transform: scale(0.965);
 }
 
 .vod-poster {
@@ -274,12 +376,20 @@ img {
   border-radius: 10px;
   overflow: hidden;
   background: var(--bg-card);
+  /*
+   * 半透明白色描边 + 深色投影。
+   * 纯深色背景上，海报与背景容易糊在一起；这层描边把卡片从背景里
+   * 「提」出来，同时又不像实心灰线那样生硬。
+   */
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .vod-poster img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* 图片解码完成前先显示底色，避免白闪 */
+  background: var(--bg-card);
 }
 
 .poster-fallback {
@@ -288,7 +398,7 @@ img {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #4a5468;
+  color: var(--text-faint);
   font-size: 15px;
   font-weight: 600;
   background: linear-gradient(160deg, #1c2334, #141a27);
@@ -312,13 +422,13 @@ img {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #cbd5e6;
+  color: var(--text-soft);
 }
 
 .badge-score {
   right: 5px;
   top: 5px;
-  color: #ffcc55;
+  color: var(--gold);
   font-weight: 600;
 }
 
@@ -350,7 +460,7 @@ img {
   line-height: 1.5;
   padding: 0 4px;
   border-radius: 3px;
-  color: #d8b26a;
+  color: var(--gold-dim);
   border: 1px solid rgba(216, 178, 106, 0.4);
 }
 
@@ -371,6 +481,11 @@ img {
   padding: 10px 12px;
   text-align: left;
   width: 100%;
+  transition: background 0.16s var(--ease);
+}
+
+.list-row:active {
+  background: var(--bg-card);
 }
 
 .list-thumb {
@@ -380,6 +495,7 @@ img {
   object-fit: cover;
   background: var(--bg-card);
   flex: 0 0 auto;
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .list-body {
@@ -403,11 +519,23 @@ img {
   white-space: nowrap;
 }
 
+/*
+ * 次级操作按钮（移除 / 删除 / 清空）。
+ * 用 44px 最小可点面积 —— 低于这个尺寸的手指误触率会明显上升，
+ * 视觉上仍是一行文字，靠 padding 撑开热区。
+ */
 .row-action {
   color: var(--text-dim);
   font-size: 13px;
-  padding: 6px 8px;
+  padding: 10px 8px;
+  min-height: 44px;
   flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  transition: color 0.16s var(--ease);
+}
+
+.row-action:active {
+  color: var(--text);
 }
 
 /* ============ 详情页 ============ */
@@ -432,6 +560,13 @@ img {
    */
   pointer-events: none;
   z-index: 0;
+  /*
+   * 底部渐隐到页面底色。
+   * 不加这层遮罩，模糊背景会像一块硬边色块贴在海报后面；
+   * 渐隐后它才真正退到「氛围光」的位置，不抢主体。
+   */
+  mask-image: linear-gradient(180deg, #000 35%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 35%, transparent 100%);
 }
 
 .detail-top {
@@ -471,14 +606,15 @@ img {
 
 .tag {
   font-size: 11.5px;
-  padding: 2px 8px;
+  padding: 3px 9px;
   border-radius: 5px;
   background: var(--bg-card);
-  color: var(--text-dim);
+  color: var(--text-soft);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .tag.score {
-  color: #ffcc55;
+  color: var(--gold);
   background: rgba(255, 204, 85, 0.12);
 }
 
@@ -501,7 +637,7 @@ img {
 
 .btn {
   flex: 1;
-  height: 44px;
+  height: 46px;
   border-radius: var(--radius);
   background: var(--bg-card);
   border: 1px solid var(--line);
@@ -510,6 +646,11 @@ img {
   justify-content: center;
   gap: 6px;
   font-size: 14px;
+  transition: transform 0.14s var(--ease), background 0.16s var(--ease);
+}
+
+.btn:active {
+  transform: scale(0.975);
 }
 
 .btn.primary {
@@ -517,11 +658,13 @@ img {
   border-color: var(--accent);
   color: #fff;
   font-weight: 600;
+  box-shadow: 0 2px 12px rgba(76, 141, 255, 0.3);
 }
 
 .btn.ghost.active {
-  color: #ffcc55;
+  color: var(--gold);
   border-color: rgba(255, 204, 85, 0.4);
+  background: rgba(255, 204, 85, 0.1);
 }
 
 /* 线路 / 选集 */
@@ -532,6 +675,7 @@ img {
   padding-bottom: 6px;
   margin-bottom: 10px;
   scrollbar-width: none;
+  scroll-snap-type: x proximity;
 }
 
 .line-tabs::-webkit-scrollbar {
@@ -540,18 +684,20 @@ img {
 
 .line-tab {
   flex: 0 0 auto;
-  padding: 6px 12px;
-  border-radius: 8px;
+  padding: 7px 13px;
+  border-radius: var(--radius-sm);
   background: var(--bg-soft);
   border: 1px solid var(--line);
   font-size: 12.5px;
   color: var(--text-dim);
   white-space: nowrap;
+  scroll-snap-align: start;
+  transition: background 0.16s var(--ease), border-color 0.16s var(--ease);
 }
 
 .line-tab.active {
   background: var(--accent-soft);
-  border-color: var(--accent);
+  border-color: var(--accent-line);
   color: var(--text);
 }
 
@@ -571,9 +717,13 @@ img {
   gap: 8px;
 }
 
+/*
+ * 选集按钮。高度 40px 略高于最小值，是因为长剧集动辄上百个，
+ * 密集排布时手指容易点错相邻集。
+ */
 .ep-btn {
-  height: 38px;
-  border-radius: 8px;
+  height: 40px;
+  border-radius: var(--radius-sm);
   background: var(--bg-soft);
   border: 1px solid var(--line);
   font-size: 12.5px;
@@ -581,6 +731,12 @@ img {
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+  transition: transform 0.14s var(--ease), background 0.16s var(--ease);
+}
+
+.ep-btn:active {
+  transform: scale(0.94);
 }
 
 .ep-btn.active {
@@ -588,12 +744,13 @@ img {
   border-color: var(--accent);
   color: #fff;
   font-weight: 600;
+  box-shadow: 0 2px 10px rgba(76, 141, 255, 0.34);
 }
 
 .synopsis {
   font-size: 13.5px;
-  color: #b9c1d1;
-  line-height: 1.7;
+  color: var(--text-soft);
+  line-height: 1.75;
   white-space: pre-wrap;
 }
 
@@ -635,10 +792,12 @@ img {
   justify-content: center;
   gap: 10px;
   background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(3px);
   padding: 20px;
   text-align: center;
   font-size: 13px;
-  color: #c9d2e2;
+  color: var(--text-soft);
+  z-index: 2;
 }
 
 .player-below {
@@ -648,6 +807,44 @@ img {
   background: var(--bg);
   padding: 12px 14px calc(var(--safe-b) + 20px);
   -webkit-overflow-scrolling: touch;
+}
+
+/* 播放信息条：当前来源 + 进度概览，替代原来的 setting-row */
+.player-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 0 12px;
+}
+
+.player-info-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.player-info-main .t {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.player-info-main .d {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* 选集标题行：左侧标题、右侧「当前集 / 总集数」 */
+.ep-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.ep-count {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
 }
 
 .player-bar {
@@ -664,14 +861,22 @@ img {
 }
 
 .icon-btn {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  transition: transform 0.14s var(--ease), background 0.16s var(--ease);
+}
+
+.icon-btn:active {
+  transform: scale(0.92);
+  background: rgba(0, 0, 0, 0.72);
 }
 
 .player-title {
@@ -681,7 +886,7 @@ img {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #e8ecf4;
+  color: var(--text);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
@@ -719,7 +924,8 @@ img {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 13px 14px;
+  min-height: 52px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -739,22 +945,29 @@ img {
 .setting-label .d {
   font-size: 12px;
   color: var(--text-dim);
-  margin-top: 2px;
+  margin-top: 3px;
   word-break: break-all;
+  line-height: 1.5;
 }
 
+/*
+ * 自绘开关。用 padding 撑出 44px 高的可点区域 —— 开关本体只有 26px 高，
+ * 若不加内边距，手指很容易点偏到相邻行上。
+ */
 .switch {
   width: 44px;
   height: 26px;
   border-radius: 13px;
-  background: #333b4d;
+  background: var(--bg-raise);
+  box-shadow: inset 0 0 0 1px var(--line);
   position: relative;
-  transition: background 0.2s;
+  transition: background 0.2s var(--ease), box-shadow 0.2s var(--ease);
   flex: 0 0 auto;
 }
 
 .switch.on {
   background: var(--accent);
+  box-shadow: none;
 }
 
 .switch::after {
@@ -789,7 +1002,7 @@ img {
 }
 
 .status-dot.idle {
-  background: #4a5468;
+  background: var(--text-faint);
 }
 
 /* ============ 底部导航 ============ */
@@ -801,8 +1014,8 @@ img {
   height: calc(var(--nav-h) + var(--safe-b));
   padding-bottom: var(--safe-b);
   display: flex;
-  background: rgba(15, 19, 28, 0.96);
-  backdrop-filter: blur(12px);
+  background: rgba(12, 15, 20, 0.9);
+  backdrop-filter: blur(16px) saturate(1.4);
   border-top: 1px solid var(--line);
   z-index: 20;
 }
@@ -815,12 +1028,17 @@ img {
   justify-content: center;
   gap: 3px;
   font-size: 11px;
-  color: #66708a;
+  color: var(--text-faint);
   text-decoration: none;
+  transition: color 0.16s var(--ease);
 }
 
 .nav-item.active {
   color: var(--accent);
+}
+
+.nav-item:active {
+  opacity: 0.7;
 }
 
 /* ============ 通用 ============ */
@@ -858,15 +1076,15 @@ img {
 }
 
 .toast {
-  background: rgba(28, 34, 48, 0.97);
-  border: 1px solid var(--line);
+  background: rgba(35, 41, 54, 0.97);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
-  padding: 8px 16px;
+  padding: 9px 17px;
   font-size: 13px;
   max-width: 84vw;
   text-align: center;
-  animation: toast-in 0.22s ease;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  animation: toast-in 0.22s var(--ease);
+  box-shadow: var(--shadow-lg);
 }
 
 @keyframes toast-in {
@@ -879,10 +1097,18 @@ img {
 .modal-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.62);
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: flex-end;
   z-index: 70;
+  animation: fade-in 0.18s var(--ease);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .modal {
@@ -890,8 +1116,17 @@ img {
   max-width: 780px;
   margin: 0 auto;
   background: var(--bg-soft);
-  border-radius: 16px 16px 0 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-top: 1px solid var(--line-strong);
   padding: 18px 16px calc(var(--safe-b) + 18px);
+  box-shadow: var(--shadow-lg);
+  animation: sheet-up 0.24s var(--ease);
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(16px);
+  }
 }
 
 .modal h3 {
@@ -907,18 +1142,19 @@ img {
   font-size: 12.5px;
   color: var(--text-dim);
   display: block;
-  margin-bottom: 5px;
+  margin-bottom: 6px;
 }
 
 .field input {
   width: 100%;
-  height: 42px;
-  border-radius: 10px;
+  height: 44px;
+  border-radius: var(--radius-sm);
   background: var(--bg-card);
   border: 1px solid var(--line);
   color: var(--text);
   padding: 0 12px;
   outline: none;
+  transition: border-color 0.16s var(--ease);
 }
 
 .field input:focus {

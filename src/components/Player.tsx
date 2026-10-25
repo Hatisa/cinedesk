@@ -10,7 +10,7 @@
  */
 import Hls from 'hls.js';
 import { useEffect, useRef, useState } from 'react';
-import { NativeHttpLoader } from '../core';
+import { NativeHttpLoader, exitFullscreen, isFullscreen, onBack, setLandscape } from '../core';
 
 interface Props {
   src: string;
@@ -39,6 +39,70 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
   const [message, setMessage] = useState('');
   const cbRef = useRef({ onProgress, onError, onEnded });
   cbRef.current = { onProgress, onError, onEnded };
+
+  /*
+   * 全屏与横屏联动。
+   *
+   * 视频全屏后画面是宽幅的，竖屏下左右大片留黑、上下空间浪费，
+   * 必须自动转横屏才符合看视频的习惯。
+   *
+   * 判定方式刻意做成「事件 + 轮询」双保险，因为全屏事件在安卓上并不可靠：
+   * 标准 Fullscreen API 会派发 fullscreenchange，但安卓 WebView 里用户点原生
+   * 控件的全屏按钮走的是原生自定义 View（Capacitor 的
+   * BridgeWebChromeClient.onShowCustomView），而 webkitbeginfullscreen /
+   * webkitendfullscreen 本是 iOS Safari 的事件，安卓上并不保证派发。
+   * 只靠事件会出现「有时转横屏、有时不转」的随机现象。
+   *
+   * 所以以轮询 webkitDisplayingFullscreen 为准（读取属性开销极小），
+   * 事件监听作为快速路径，两者都收敛到同一个 sync()。
+   */
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // 记住上次同步过的状态，避免每 400ms 重复调用原生锁屏
+    let last = isFullscreen();
+    const sync = () => {
+      const now = isFullscreen();
+      if (now === last) return;
+      last = now;
+      void setLandscape(now);
+    };
+
+    const events = [
+      'fullscreenchange',
+      'webkitfullscreenchange',
+      'webkitbeginfullscreen',
+      'webkitendfullscreen',
+    ];
+    // 断言成 EventTarget：webkit 私有事件名不在标准事件表里，直接传会被类型系统挡下
+    const doc = document as EventTarget;
+    const vid = video as EventTarget;
+    for (const e of events) {
+      doc.addEventListener(e, sync);
+      vid.addEventListener(e, sync);
+    }
+    const timer = window.setInterval(sync, 400);
+
+    // 按返回键时若正在全屏，先退出全屏而不是直接离开播放页
+    const offBack = onBack(() => {
+      if (!isFullscreen()) return false;
+      exitFullscreen();
+      return true;
+    });
+
+    return () => {
+      window.clearInterval(timer);
+      for (const e of events) {
+        doc.removeEventListener(e, sync);
+        vid.removeEventListener(e, sync);
+      }
+      offBack();
+      // 离开播放页必须转回竖屏：本 App 其余页面都是竖屏布局，
+      // 带着横屏返回会让列表页与选集区错位
+      void setLandscape(false);
+    };
+  }, []);
 
   /*
    * startAt 只能以 ref 读取，绝不能放进下面那个 effect 的依赖里。

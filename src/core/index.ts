@@ -9,3 +9,4 @@ export * from './store';
 export * from './aggregate';
 export * from './cache';
 export * from './hlsLoader';
+export * from './native';
