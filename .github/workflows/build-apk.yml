@@ -33,6 +33,9 @@ jobs:
       - name: 配置 Android SDK
         uses: android-actions/setup-android@v3
         with:
+          # 显式接受 SDK 许可协议，否则 Gradle 自动补装组件时
+          # 会因「licences have not been accepted」直接失败
+          accept-android-sdk-licenses: true
           # 显式装好编译 Capacitor 7 所需的 SDK 组件。
           # 不预装的话 Gradle 会在构建时临时下载，容易因许可协议
           # 或网络问题直接失败，且报错信息很不直观。
