@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import VodCard from '../components/VodCard';
 import { useToast } from '../components/Toast';
-import { getItem, searchAll, putItems, type AggregatedItem } from '../core';
+import { getItem, putItems, recommendFor, searchAll, type AggregatedItem } from '../core';
 import { useApp } from '../state/AppState';
 
 export default function Detail() {
@@ -17,8 +18,32 @@ export default function Detail() {
   const [lineIdx, setLineIdx] = useState(0);
   const [epIdx, setEpIdx] = useState(0);
   const [loading, setLoading] = useState(false);
+  /*
+   * 推荐结果连同「它属于哪部影片」一起存。
+   * 只存数组的话，切到另一部影片的瞬间会先渲染出上一部的推荐，
+   * 看上去像是推荐错了；带上 key 就能在数据到齐前不渲染这一块。
+   */
+  const [rec, setRec] = useState<{ key: string; items: AggregatedItem[] } | null>(null);
 
   const name = sp.get('name') || item?.name || '';
+
+  /*
+   * 路由参数变化时重置页面状态。
+   *
+   * 从「猜你喜欢」点进另一部影片走的是同一个路由（/detail/:key），
+   * react-router 会复用组件实例，useState 的初始值不会再执行一次，
+   * 结果就是地址变了、页面还停在上一部。这里显式按 key 重建：
+   * state 里带了条目就用它，否则回退到内存缓存。
+   */
+  useEffect(() => {
+    const next = (loc.state as { item?: AggregatedItem } | null)?.item ?? getItem(key);
+    setItem(next ?? null);
+    setLineIdx(0);
+    setEpIdx(0);
+    setRec(null);
+    // loc.state 由导航动作给出，跟着 key 一起变，不需要单独成为依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 
   // 直接打开链接（或进程被回收后恢复）时缓存可能已失效，用片名重新搜索
   useEffect(() => {
@@ -46,6 +71,45 @@ export default function Detail() {
   // 默认选第一条直链线路的第一集
   const current = useMemo(() => item?.variants[lineIdx] ?? null, [item, lineIdx]);
   useEffect(() => setEpIdx(0), [lineIdx]);
+
+  /*
+   * 「猜你喜欢」。
+   *
+   * 依赖刻意只放 item.key / item.name 这类稳定值，不放 item 本身：
+   * 推荐结果会写回 item 之外的 state，若把 item 放进依赖会造成重复请求。
+   *
+   * 用当前线路所属的源去查候选——分类 id（ac=list 返回的 type_id）是各源
+   * 私有的，拿 A 源的 id 去查 B 源会得到完全不相干的结果。
+   */
+  useEffect(() => {
+    if (!item) return;
+    const variant = item.variants[0];
+    if (!variant) return;
+
+    /*
+     * 必须用列表里那份真实的源配置：分类 id 是各源私有的，而 recommendFor
+     * 还要拿 source.api 去请求。不能就地拼一个只有 key/name 的对象——
+     * 那样 api 是空的，请求必然失败。
+     */
+    const source = sources.find((s) => s.key === variant.sourceKey);
+    if (!source) return;
+
+    const signal = { aborted: false };
+    const keyAtStart = item.key;
+    void (async () => {
+      const items = await recommendFor(item, {
+        source,
+        timeoutMs: settings.timeoutMs,
+        signal,
+      });
+      if (signal.aborted) return;
+      setRec({ key: keyAtStart, items });
+    })();
+
+    return () => {
+      signal.aborted = true;
+    };
+  }, [item, sources, settings.timeoutMs]);
 
   if (loading) {
     return (
@@ -81,6 +145,20 @@ export default function Detail() {
       `/play/${encodeURIComponent(item.key)}?source=${encodeURIComponent(current?.sourceKey ?? '')}&line=${line}&ep=${ep}`,
       { state: { item } },
     );
+  };
+
+  /*
+   * 点「猜你喜欢」里的一部影片。
+   *
+   * 走的是同一个路由（/detail/:key），react-router 会复用组件实例而不是重新挂载，
+   * 因此必须把完整条目放进 state 传过去，并由下面的 key 变化 effect 重置页面状态；
+   * 只改 URL 的话，页面会继续显示上一部影片的内容。
+   */
+  const openRec = (r: AggregatedItem) => {
+    putItems([r]);
+    nav(`/detail/${encodeURIComponent(r.key)}?name=${encodeURIComponent(r.name)}`, {
+      state: { item: r },
+    });
   };
 
   return (
@@ -198,6 +276,24 @@ export default function Detail() {
             <span className="section-title">剧情简介</span>
           </div>
           <div className="synopsis">{current.content}</div>
+        </>
+      )}
+
+      {/*
+        「猜你喜欢」。rec 用 key 与当前影片比对，数据没到时整块不渲染——
+        推荐位宁可晚一点出现，也不能闪出上一部影片的推荐。
+      */}
+      {rec && rec.key === item.key && rec.items.length > 0 && (
+        <>
+          <div className="section-head">
+            <span className="section-title">猜你喜欢</span>
+            <span className="section-more">同类型 · 同演员</span>
+          </div>
+          <div className="grid">
+            {rec.items.map((r) => (
+              <VodCard key={r.key} item={r} onClick={() => openRec(r)} showSources={false} />
+            ))}
+          </div>
         </>
       )}
     </div>

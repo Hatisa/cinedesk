@@ -1,11 +1,22 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import VodCard from '../components/VodCard';
 import { useToast } from '../components/Toast';
-import { putItems, searchAll, type AggregatedItem, type SourceStatus } from '../core';
+import {
+  FALLBACK_TRENDING,
+  TRENDING_TABS,
+  expandCache,
+  isFresh,
+  loadTrendingCache,
+  putItems,
+  refreshTrending,
+  searchAll,
+  type AggregatedItem,
+  type SourceStatus,
+  type TrendingMap,
+  type TrendingTab,
+} from '../core';
 import { useApp } from '../state/AppState';
-
-const HOT = ['庆余年', '三体', '狂飙', '琅琊榜', '甄嬛传', '沙丘', '奥本海默', '流浪地球'];
 
 export default function Home() {
   const nav = useNavigate();
@@ -19,9 +30,29 @@ export default function Home() {
   const [searched, setSearched] = useState(false);
   const [totalMs, setTotalMs] = useState(0);
   const [recent, setRecent] = useState<string[]>([]);
+  const [trending, setTrending] = useState<TrendingMap>(FALLBACK_TRENDING);
+  const [trendTab, setTrendTab] = useState<TrendingTab>('movie');
   const inputRef = useRef<HTMLInputElement>(null);
   // 每次搜索递增，防止旧搜索的结果覆盖新搜索
   const seqRef = useRef(0);
+
+  /*
+   * 热搜榜：先用缓存立刻渲染，再后台刷新。
+   * 缓存够新就不打接口——榜单一天内变化很小，没必要每次开 App 都请求。
+   */
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const cache = await loadTrendingCache();
+      if (alive && cache?.data) setTrending(expandCache(cache.data));
+      if (cache && isFresh(cache)) return;
+      const fresh = await refreshTrending();
+      if (alive) setTrending(fresh);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const activeCount = useMemo(() => sources.filter((s) => s.enabled).length, [sources]);
   const doneCount = statuses.filter((s) => s.state !== 'loading').length;
@@ -141,20 +172,39 @@ export default function Home() {
       </form>
 
       {!searched && (
-        <div className="chip-row">
-          {HOT.map((k) => (
-            <button
-              key={k}
-              type="button"
-              className="chip"
-              onClick={() => {
-                setKeyword(k);
-                void runSearch(k);
-              }}
-            >
-              {k}
-            </button>
-          ))}
+        <div className="trend-box">
+          <div className="trend-head">
+            <span className="trend-title">实时热搜</span>
+            <div className="trend-tabs">
+              {TRENDING_TABS.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  className={`trend-tab${trendTab === t.key ? ' active' : ''}`}
+                  onClick={() => setTrendTab(t.key)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="trend-list">
+            {trending[trendTab].map((e, i) => (
+              <button
+                key={e.title}
+                type="button"
+                className="trend-row"
+                onClick={() => {
+                  setKeyword(e.title);
+                  void runSearch(e.title);
+                }}
+              >
+                <span className={`trend-rank${i < 3 ? ' top' : ''}`}>{i + 1}</span>
+                <span className="trend-name">{e.title}</span>
+                {e.score > 0 && <span className="trend-score">{e.score.toFixed(1)}</span>}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -195,14 +245,6 @@ export default function Home() {
                 width: `${activeCount ? (doneCount / activeCount) * 100 : 0}%`,
               }}
             />
-          </div>
-          <div className="src-chips">
-            {statuses.map((s) => (
-              <span key={s.key} className={`src-chip ${s.state}`} title={s.error || `${s.ms}ms`}>
-                {s.name}
-                {s.state === 'ok' && s.count > 0 ? ` ${s.count}` : ''}
-              </span>
-            ))}
           </div>
         </div>
       )}

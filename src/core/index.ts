@@ -8,5 +8,7 @@ export * from './health';
 export * from './store';
 export * from './aggregate';
 export * from './cache';
+export * from './trending';
+export * from './recommend';
 export * from './hlsLoader';
 export * from './native';

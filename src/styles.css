@@ -113,7 +113,14 @@ img {
 
 /* ============ 页面骨架 ============ */
 .page {
-  padding: calc(var(--safe-t) + 12px) 14px calc(var(--nav-h) + var(--safe-b) + 20px);
+  /*
+   * 顶部留白分两层：
+   *   var(--safe-t) —— 系统报告的安全区（刘海、挖孔）。原生侧已通过
+   *     capacitor.config.ts 的 adjustMarginsForEdgeToEdge 给 WebView 让出了
+   *     状态栏，此时这里通常为 0；保留是为了兼容个别仍会报告安全区的机型。
+   *   16px —— 与状态栏之间的视觉呼吸，太少会让标题贴住状态栏边缘。
+   */
+  padding: calc(var(--safe-t) + 16px) 14px calc(var(--nav-h) + var(--safe-b) + 20px);
   max-width: 780px;
   margin: 0 auto;
 }
@@ -248,6 +255,111 @@ img {
   transform: scale(0.96);
 }
 
+/* ============ 实时热搜榜 ============ */
+.trend-box {
+  margin-top: 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.trend-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px 9px;
+  border-bottom: 1px solid var(--line);
+}
+
+.trend-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+}
+
+.trend-tabs {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.trend-tab {
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+
+.trend-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.trend-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * 榜单行高 42px：比列表项略矮，是因为一屏要放下十来条才像「榜」，
+ * 但又不能低于 40px，否则点起来发虚。
+ */
+.trend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  height: 42px;
+  text-align: left;
+  width: 100%;
+  transition: background 0.16s var(--ease);
+}
+
+.trend-row:active {
+  background: var(--bg-card);
+}
+
+.trend-row + .trend-row {
+  border-top: 1px solid var(--line);
+}
+
+/* 名次用等宽数字，一到两位数切换时不会把片名挤动 */
+.trend-rank {
+  flex: 0 0 auto;
+  width: 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* 前三名用强调色标出，一眼能看出榜首 */
+.trend-rank.top {
+  color: var(--accent);
+}
+
+.trend-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trend-score {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ============ 搜索进度 ============ */
 .progress-box {
   margin-top: 14px;
@@ -285,46 +397,6 @@ img {
   background: var(--accent);
   border-radius: 2px;
   transition: width 0.25s var(--ease);
-}
-
-.src-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 9px;
-}
-
-.src-chip {
-  font-size: 11.5px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: var(--bg-card);
-  color: var(--text-dim);
-  border: 1px solid transparent;
-}
-
-.src-chip.ok {
-  color: var(--ok);
-  border-color: rgba(52, 211, 153, 0.3);
-}
-
-.src-chip.fail {
-  color: var(--text-faint);
-  text-decoration: line-through;
-}
-
-.src-chip.loading {
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 0.45;
-  }
-  50% {
-    opacity: 1;
-  }
 }
 
 /* ============ 卡片网格 ============ */
@@ -855,7 +927,8 @@ img {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: calc(var(--safe-t) + 8px) 12px 8px;
+  /* 比其他页面再收一点：播放页顶栏浮在画面上，留白过多会压住内容 */
+  padding: calc(var(--safe-t) + 14px) 12px 10px;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.75), transparent);
   z-index: 5;
 }
