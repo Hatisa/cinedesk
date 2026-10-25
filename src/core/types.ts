@@ -92,6 +92,8 @@ export interface VodItem {
   director: string;
   content: string;
   lines: PlayLine[];
+  /** 是否被判定为网络短剧（分类命中短剧/AI漫剧/反转爽剧等） */
+  shortDrama: boolean;
 }
 
 /** 跨源聚合后的搜索结果：同名影片合并为一条，内部保留各源副本 */
@@ -104,6 +106,12 @@ export interface AggregatedItem {
   year: string;
   typeName: string;
   score: number;
+  /**
+   * 是否短剧。只要**任一**来源把它归入短剧分类即为真——
+   * 实测同一部「庆余年之风起沧州」在 ffzy 标为「短剧」、在 jszy 标为「古装仙侠」，
+   * 取「或」才能避免短剧借正常源的分类蒙混到前面。
+   */
+  shortDrama: boolean;
   /** 各来源副本，按健康度排序 */
   variants: VodItem[];
 }

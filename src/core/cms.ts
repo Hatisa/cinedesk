@@ -10,7 +10,7 @@
  * 例： vod_play_from = "jsyun$$$jsm3u8"
  *      vod_play_url  = "第01集$https://a/play/xxx#第02集$...$$$第01集$https://b/x.m3u8#..."
  */
-import { isBlocked } from './filter';
+import { classifyContent } from './filter';
 import type { Episode, PlayLine, RawVod, RawVodResponse, SourceConfig, VodItem } from './types';
 
 const SEP_LINE = '$$$';
@@ -79,15 +79,24 @@ export function isDirectUrl(url: string): boolean {
 export function toVodItem(raw: RawVod, source: SourceConfig): VodItem | null {
   const name = (raw.vod_name || '').trim();
   if (!name) return null;
-  if (isBlocked(name)) return null;
+
+  const scoreRaw = raw.vod_douban_score;
+  const score = typeof scoreRaw === 'number' ? scoreRaw : parseFloat(String(scoreRaw ?? ''));
+  const safeScore = Number.isFinite(score) ? score : 0;
+
+  /*
+   * 内容甄别在建线路之前做，成人条目连解析播放地址的开销都省掉。
+   * 分类文本要同时喂 vod_class 与 type_name：前者常是「剧情,古装,内地剧」
+   * 这样的多值串（可能藏着短剧标记），后者是主分类。
+   */
+  const classText = [raw.vod_class, raw.type_name].filter(Boolean).join(' ');
+  const verdict = classifyContent({ name, classText, score: safeScore });
+  if (verdict.adult) return null;
 
   const lines = parsePlayLines(raw);
   if (!lines.length) return null;
   // 没有任何直链线路的条目会点开才发现放不了，直接丢弃以保证「点开即播」
   if (!lines.some((l) => l.direct)) return null;
-
-  const scoreRaw = raw.vod_douban_score;
-  const score = typeof scoreRaw === 'number' ? scoreRaw : parseFloat(String(scoreRaw ?? ''));
 
   return {
     sourceKey: source.key,
@@ -99,11 +108,12 @@ export function toVodItem(raw: RawVod, source: SourceConfig): VodItem | null {
     year: String(raw.vod_year || '').trim(),
     area: (raw.vod_area || '').trim(),
     typeName: (raw.vod_class || raw.type_name || '').trim(),
-    score: Number.isFinite(score) ? score : 0,
+    score: safeScore,
     actor: (raw.vod_actor || '').trim(),
     director: (raw.vod_director || '').trim(),
     content: stripHtml(raw.vod_content || ''),
     lines,
+    shortDrama: verdict.shortDrama,
   };
 }
 

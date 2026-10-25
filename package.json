@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test": "node --test \"src/**/*.test.ts\"",
     "gen:icon": "node scripts/gen-icon.mjs",
     "cap:add": "cap add android",
     "cap:sync": "npm run build && cap sync android",

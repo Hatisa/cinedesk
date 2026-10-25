@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { shortRemarks } from '../core';
+import { isShortDramaClass, shortRemarks } from '../core';
 import type { AggregatedItem } from '../core';
 
 interface Props {
@@ -13,6 +13,11 @@ interface Props {
 export default function VodCard({ item, onClick, showSources = true }: Props) {
   const [broken, setBroken] = useState(false);
   const remarks = shortRemarks(item.remarks);
+
+  // 分类只展示主分类（vod_class 常是「剧情,古装,内地剧」这样的多值串）
+  const mainClass = item.typeName.split(/[\/,]/)[0] || '';
+  // 主分类本身就是短剧分类时，标签会与分类名重复（「短剧 短剧」），此时不再附标签
+  const showShortTag = item.shortDrama && !isShortDramaClass(mainClass);
 
   return (
     <button className="vod-card" onClick={onClick} type="button">
@@ -39,7 +44,9 @@ export default function VodCard({ item, onClick, showSources = true }: Props) {
         </div>
         <div className="vod-sub">
           {item.year && <span>{item.year}</span>}
-          {item.typeName && <span>{item.typeName.split(/[\/,]/)[0]}</span>}
+          {mainClass && <span>{mainClass}</span>}
+          {/* 短剧统一沉底，标出来让用户知道为什么它排在后面 */}
+          {showShortTag && <span className="tag-short">短剧</span>}
         </div>
         {showSources && item.variants.length > 1 && (
           <div className="vod-sources">{item.variants.length} 个来源</div>

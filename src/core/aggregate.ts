@@ -10,7 +10,7 @@
  *   4. 每次结果都回收为健康度，让排序随真实表现自我修正。
  */
 import { extractList, toVodItem } from './cms';
-import { normalizeName } from './filter';
+import { contentRank, normalizeName } from './filter';
 import { buildApiUrl, httpGetJson } from './http';
 import { HealthStore, sortByHealth } from './health';
 import type {
@@ -98,6 +98,7 @@ function mergeItems(outcomes: SourceOutcome[], health: HealthStore): AggregatedI
           year: item.year,
           typeName: item.typeName,
           score: item.score,
+          shortDrama: item.shortDrama,
           variants: [],
         };
         map.set(key, agg);
@@ -111,6 +112,8 @@ function mergeItems(outcomes: SourceOutcome[], health: HealthStore): AggregatedI
       if (!agg.year && item.year) agg.year = item.year;
       if (!agg.typeName && item.typeName) agg.typeName = item.typeName;
       if (item.score > agg.score) agg.score = item.score;
+      // 任一来源标为短剧即算短剧，避免它借正常源的分类蒙混到前面
+      if (item.shortDrama) agg.shortDrama = true;
     }
   }
 
@@ -121,8 +124,20 @@ function mergeItems(outcomes: SourceOutcome[], health: HealthStore): AggregatedI
     agg.variants.sort((a, b) => health.score(b.sourceKey) - health.score(a.sourceKey));
   }
 
-  // 结果排序：被越多源收录说明越热门可靠；同分再看评分
-  list.sort((a, b) => b.variants.length - a.variants.length || b.score - a.score);
+  /*
+   * 结果排序，优先级从高到低：
+   *   1. 内容分层 —— 豆瓣有评分的作品 > 普通影视 > 网络短剧。
+   *      不能用「被多少源收录」打头：短剧是流水线批量生产的，同一部常被十几个源
+   *      同时收录，反而把用户想看的影视作品挤到后面。
+   *   2. 豆瓣评分 —— 同为正规作品时，分数高的更可能是用户想看的。
+   *   3. 收录源数 —— 说明热门与可靠，作为同级内的补充信号。
+   */
+  list.sort(
+    (a, b) =>
+      contentRank(a) - contentRank(b) ||
+      b.score - a.score ||
+      b.variants.length - a.variants.length,
+  );
   return list;
 }
 

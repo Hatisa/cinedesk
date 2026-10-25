@@ -344,6 +344,16 @@ img {
   color: var(--accent);
 }
 
+/* 短剧标记：说明它为什么排在后面，而不是悄悄降权 */
+.tag-short {
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 0 4px;
+  border-radius: 3px;
+  color: #d8b26a;
+  border: 1px solid rgba(216, 178, 106, 0.4);
+}
+
 /* ============ 列表（历史 / 源管理） ============ */
 .list {
   display: flex;
