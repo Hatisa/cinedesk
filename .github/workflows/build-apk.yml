@@ -30,15 +30,18 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      # 必须用 v4，不能用 v3。
+      #
+      # v3 的 packages 默认值里含已废弃的 `tools` 包，而 Google 已把它从
+      # repository2-3.xml 下架，`sdkmanager tools` 会直接 exit 1 导致这一步
+      # 失败（官方 issue #537）。v4 删掉了这个默认值，即为该问题的修复。
       - name: 配置 Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
-          # 显式接受 SDK 许可协议，否则 Gradle 自动补装组件时
-          # 会因「licences have not been accepted」直接失败
+          # 显式接受 SDK 许可协议，否则 Gradle 自动补装组件时会失败
           accept-android-sdk-licenses: true
-          # 显式装好编译 Capacitor 7 所需的 SDK 组件。
-          # 不预装的话 Gradle 会在构建时临时下载，容易因许可协议
-          # 或网络问题直接失败，且报错信息很不直观。
+          # 显式装好编译 Capacitor 7 所需的组件（compileSdk 35）。
+          # 注意：这里不要出现 `tools`，那正是上面那个坑。
           packages: 'platforms;android-35 build-tools;35.0.0 platform-tools'
 
       - name: 打印构建环境
