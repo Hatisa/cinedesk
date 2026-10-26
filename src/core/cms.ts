@@ -81,7 +81,19 @@ export function toVodItem(raw: RawVod, source: SourceConfig): VodItem | null {
   if (!name) return null;
 
   const scoreRaw = raw.vod_douban_score;
-  const score = typeof scoreRaw === 'number' ? scoreRaw : parseFloat(String(scoreRaw ?? ''));
+  let score = typeof scoreRaw === 'number' ? scoreRaw : parseFloat(String(scoreRaw ?? ''));
+  if (!Number.isFinite(score) || score <= 0) {
+    /*
+     * 豆瓣分缺失时的回退。不少采集站只返回站内分 vod_score，而站内分
+     * 普遍注水（几乎全是 8.5+）：直接采用会让这些条目在分层排序里冒充
+     * 豆瓣高分作品；完全不采用则让「唯一收录该片的源恰好不返回豆瓣分」
+     * 的影片永远沉在无分层。折中——回退站内分并打 0.9 折：保留「正规
+     * 作品」的分层信号，又让注水分在与真豆瓣分同台排序时天然靠后。
+     */
+    const siteRaw = raw.vod_score;
+    const site = typeof siteRaw === 'number' ? siteRaw : parseFloat(String(siteRaw ?? ''));
+    if (Number.isFinite(site) && site > 0) score = Math.round(site * 9) / 10;
+  }
   const safeScore = Number.isFinite(score) ? score : 0;
 
   /*

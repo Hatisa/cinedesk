@@ -31,6 +31,7 @@ export interface RawVod {
   vod_area?: string;
   vod_class?: string;
   vod_douban_score?: string | number;
+  vod_score?: string | number;
   vod_play_from?: string;
   vod_play_url?: string;
   vod_actor?: string;

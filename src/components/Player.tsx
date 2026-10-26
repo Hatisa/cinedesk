@@ -20,6 +20,8 @@ interface Props {
   onProgress?: (position: number, duration: number) => void;
   onError?: (message: string) => void;
   onEnded?: () => void;
+  /** 每个播放地址首次真正出画面时回调一次——上层借此确认「这条线路可用」 */
+  onPlaying?: () => void;
 }
 
 type State = 'loading' | 'playing' | 'error';
@@ -33,12 +35,20 @@ function refererOf(url: string): string {
   }
 }
 
-export default function Player({ src, startAt = 0, autoPlay = true, onProgress, onError, onEnded }: Props) {
+export default function Player({
+  src,
+  startAt = 0,
+  autoPlay = true,
+  onProgress,
+  onError,
+  onEnded,
+  onPlaying,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [state, setState] = useState<State>('loading');
   const [message, setMessage] = useState('');
-  const cbRef = useRef({ onProgress, onError, onEnded });
-  cbRef.current = { onProgress, onError, onEnded };
+  const cbRef = useRef({ onProgress, onError, onEnded, onPlaying });
+  cbRef.current = { onProgress, onError, onEnded, onPlaying };
 
   /*
    * 全屏与横屏联动。
@@ -135,6 +145,20 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
     let started = false;
     let watchdog = 0;
 
+    /*
+     * 每个播放地址只播报一次「真正出画面」。
+     * manifest 解析成功 ≠ 能播（后面的分片仍可能 404），playing 事件才是
+     * 线路可用的实锤。上层借此解除该源此前的失败标记（自动换源后手动
+     * 点回旧源时不再带着「死亡」记录）。
+     */
+    let announced = false;
+    const announcePlaying = () => {
+      if (announced) return;
+      announced = true;
+      cbRef.current.onPlaying?.();
+    };
+    video.addEventListener('playing', announcePlaying);
+
     const applyStart = () => {
       const at = startAtRef.current;
       if (at > 1 && Number.isFinite(video.duration) && at < video.duration - 5) {
@@ -217,7 +241,10 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
       };
       video.addEventListener('loadedmetadata', onLoaded);
       hls = null;
-      return () => video.removeEventListener('loadedmetadata', onLoaded);
+      return () => {
+        video.removeEventListener('loadedmetadata', onLoaded);
+        video.removeEventListener('playing', announcePlaying);
+      };
     } else {
       video.src = src;
       if (autoPlay) void video.play().catch(() => undefined);
@@ -228,6 +255,7 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
       hls?.destroy();
       video.removeAttribute('src');
       video.load();
+      video.removeEventListener('playing', announcePlaying);
     };
     /*
      * 依赖里刻意不含 startAt：它随播放进度不断变大，一旦进入依赖就会导致
@@ -254,21 +282,30 @@ export default function Player({ src, startAt = 0, autoPlay = true, onProgress, 
       pos = video.currentTime;
       dur = video.duration;
     };
+    /*
+     * 进度回调必须用本 effect 建立时的快照，不能动态读 cbRef。
+     * effect 周期与集一一对应（换集必然换 src）；切集时清理函数执行时
+     * 渲染已完成、cbRef.current 已指向新集回调，动态读取会把旧集的
+     * 播放位置写进新集的历史记录。快照语义：「这个周期播的是哪一集，
+     * 离开时就还给哪一集」。
+     */
+    const progressCb = cbRef.current.onProgress;
     const report = () => {
-      if (Number.isFinite(dur) && dur > 0) cbRef.current.onProgress?.(pos, dur);
+      if (Number.isFinite(dur) && dur > 0) progressCb?.(pos, dur);
     };
     /*
-     * last 以「当前时刻」为起点，而不是 0。若写成 0，首次 timeupdate 就会满足
-     * now - 0 >= 5000 而立刻上报一次，等于刚起播就写了一条 position≈0 的
-     * 历史记录，把上一次的续播位置覆盖掉。
+     * timeupdate 只更新内存缓存，不再周期性触发落盘。
+     *
+     * 原来这里每 5 秒 report 一次 → rememberPlay → setHistory + Preferences.set，
+     * 每次都写原生 SharedPreferences 并让整个 App 树重渲染（history 在全局
+     * state 里，所有 useApp() 消费者跟着渲染）。两小时电影 = 1440 次写盘。
+     *
+     * 现在进度只在真正需要的时刻落盘：切后台/锁屏（onHide）、离开播放页
+     * （下方清理）。极端情况（播放中直接杀进程）丢一段进度，可接受——
+     * Android 上从最近任务划掉 App 前通常会先触发可见性变化，多数能兜住。
      */
-    let last = Date.now();
     const onTime = () => {
       track();
-      const now = Date.now();
-      if (now - last < 5000) return;
-      last = now;
-      report();
     };
     const onCanPlay = () => setState('playing');
     const onWaiting = () => setState('loading');

@@ -4,12 +4,16 @@ import VodCard from '../components/VodCard';
 import { useToast } from '../components/Toast';
 import {
   FALLBACK_TRENDING,
+  KEYS,
   TRENDING_TABS,
   expandCache,
   isFresh,
+  loadRecent,
   loadTrendingCache,
   putItems,
+  pushRecent,
   refreshTrending,
+  saveJSON,
   searchAll,
   type AggregatedItem,
   type SourceStatus,
@@ -34,6 +38,16 @@ export default function Home() {
   const [searched, setSearched] = useState(search !== null);
   const [totalMs, setTotalMs] = useState(search?.totalMs ?? 0);
   const [recent, setRecent] = useState<string[]>([]);
+  // 搜索历史持久化：此前只存在内存里，App 重启即失；现在落盘，重启后仍在
+  useEffect(() => {
+    let alive = true;
+    void loadRecent().then((list) => {
+      if (alive && list.length) setRecent(list);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [trending, setTrending] = useState<TrendingMap>(FALLBACK_TRENDING);
   const [trendTab, setTrendTab] = useState<TrendingTab>('movie');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -77,7 +91,11 @@ export default function Home() {
       setItems([]);
       setStatuses([]);
       setTotalMs(0);
-      setRecent((prev) => [kw, ...prev.filter((k) => k !== kw)].slice(0, 8));
+      setRecent((prev) => {
+        const next = pushRecent(prev, kw);
+        void saveJSON(KEYS.recent, next);
+        return next;
+      });
       // 新搜索开始，旧快照立即作废，避免中途返回时闪出上一轮的结果
       setSearch(null);
 
@@ -177,9 +195,26 @@ export default function Home() {
             </button>
           )}
         </div>
-        <button className="btn-search" type="submit" disabled={searching || !ready}>
-          {searching ? '搜索中' : '搜索'}
-        </button>
+        {searching ? (
+          /* 搜索中最长可等 20 秒，必须给用户「停止」的出口，而不是只能干等或杀 App */
+          <button
+            className="btn-search"
+            type="button"
+            onClick={() => {
+              seqRef.current += 1; // 使在途搜索失效：结果返回时会被 seq 检查丢弃
+              setSearching(false);
+              setSearched(false); // 回到初始态：热搜榜回来，进度框与「没有找到」不出现
+              setStatuses([]);
+              toast('已停止搜索');
+            }}
+          >
+            停止
+          </button>
+        ) : (
+          <button className="btn-search" type="submit" disabled={!ready}>
+            搜索
+          </button>
+        )}
       </form>
 
       {!searched && (

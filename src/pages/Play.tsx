@@ -118,7 +118,31 @@ export default function Play() {
 
   /** 播完自动进入下一集，追剧时不必每次退回选集手动点 */
   const onEnded = () => {
-    if (epIdx + 1 < epTotal) setEpIdx(epIdx + 1);
+    if (epIdx + 1 < epTotal) {
+      const nextIdx = epIdx + 1;
+      const nextEp = line?.episodes[nextIdx];
+      /*
+       * 进度改为事件落盘后（不再每 5 秒写历史），自动连播必须立刻给新集
+       * 建一条 0 进度记录：否则连播后直接锁屏/杀 App，历史仍停在上一集
+       * 结尾，下次进来会重看上一集片尾。
+       */
+      if (item && current && settings.recordHistory && nextEp) {
+        rememberPlay({
+          key: item.key,
+          name: item.name,
+          pic: item.pic,
+          sourceKey: current.sourceKey,
+          sourceName: current.sourceName,
+          vodId: current.vodId,
+          episodeIndex: nextIdx,
+          episodeName: nextEp.name,
+          position: 0,
+          duration: 0,
+          updatedAt: Date.now(),
+        });
+      }
+      setEpIdx(nextIdx);
+    }
   };
 
   if (!item) {
@@ -198,6 +222,12 @@ export default function Play() {
           onProgress={onProgress}
           onError={onError}
           onEnded={onEnded}
+          /*
+           * 起播成功即宣告当前线路恢复：清空全部失败标记。
+           * 否则「所有来源均失败 → 手动点回某个源重试成功」后，
+           * 该源仍带着死亡记录（透明度 0.5、下次被自动换源跳过）。
+           */
+          onPlaying={() => setFailedSources([])}
         />
       </div>
 
@@ -227,6 +257,10 @@ export default function Play() {
                     key={v.sourceKey}
                     className={`line-tab${i === lineIdx ? ' active' : ''}`}
                     onClick={() => {
+                      // 失败过的源仍允许手动重试（临时故障很常见），但要明说，别让用户对着半透明按钮猜
+                      if (dead && i !== lineIdx) {
+                        toast(`「${v.sourceName}」刚才失败过，正在重试；成功后会自动恢复标记`);
+                      }
                       setLineIdx(i);
                       setEpIdx(0);
                     }}

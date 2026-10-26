@@ -519,6 +519,13 @@ img {
   color: var(--accent);
 }
 
+/* 详情页顶部操作条：返回 + 首页，两个按钮并排 */
+.detail-topbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 /* 短剧标记：说明它为什么排在后面，而不是悄悄降权 */
 .tag-short {
   font-size: 10px;
@@ -527,6 +534,21 @@ img {
   border-radius: 3px;
   color: var(--gold-dim);
   border: 1px solid rgba(216, 178, 106, 0.4);
+}
+
+/* 观看记录行内的续播进度条 */
+.list-progress {
+  margin-top: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.list-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
 }
 
 /* ============ 列表（历史 / 源管理） ============ */

@@ -13,20 +13,18 @@ export const KEYS = {
   history: 'cinedesk.history.v1',
   favorites: 'cinedesk.favorites.v1',
   settings: 'cinedesk.settings.v1',
+  recent: 'cinedesk.recent.v1',
 } as const;
 
 export interface Settings {
   /** 单个源的请求超时（毫秒） */
   timeoutMs: number;
-  /** 是否自动剔除长期不可用的源 */
-  autoDisableFailing: boolean;
   /** 观看历史是否记录 */
   recordHistory: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   timeoutMs: 12000,
-  autoDisableFailing: false,
   recordHistory: true,
 };
 
@@ -61,6 +59,13 @@ export const loadHistory = (): Promise<HistoryEntry[]> =>
 
 export const loadFavorites = (): Promise<FavoriteEntry[]> =>
   loadJSON<FavoriteEntry[]>(KEYS.favorites, []);
+
+/** 搜索历史（关键词），最多保留 8 条 */
+export const loadRecent = (): Promise<string[]> => loadJSON<string[]>(KEYS.recent, []);
+
+export function pushRecent(list: string[], kw: string): string[] {
+  return [kw, ...list.filter((k) => k !== kw)].slice(0, 8);
+}
 
 export const loadSettings = (): Promise<Settings> =>
   loadJSON<Settings>(KEYS.settings, DEFAULT_SETTINGS);

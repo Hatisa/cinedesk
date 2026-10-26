@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useToast } from '../components/Toast';
-import { probeSources, type SourceConfig, type SourceStatus } from '../core';
+import { buildApiUrl, httpGetJson, probeSources, type SourceConfig, type SourceStatus } from '../core';
 import { useApp } from '../state/AppState';
 
 /** 从接口地址推导一个稳定的源标识 */
@@ -33,6 +33,8 @@ export default function Settings() {
   const [probeResult, setProbeResult] = useState<Record<string, SourceStatus>>({});
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name: '', api: '' });
+  /** 添加中的协议预检，防止重复提交 */
+  const [adding, setAdding] = useState(false);
 
   const enabledCount = sources.filter((s) => s.enabled).length;
 
@@ -50,7 +52,7 @@ export default function Settings() {
     toast(`测速完成：${ok}/${res.length} 个源可用`);
   };
 
-  const submitAdd = () => {
+  const submitAdd = async () => {
     const name = form.name.trim();
     const api = form.api.trim();
     if (!name) {
@@ -62,14 +64,39 @@ export default function Settings() {
       return;
     }
     const key = keyFromUrl(api);
-    if (sources.some((s) => s.key === key)) {
-      toast('该源已存在');
+    /*
+     * 除 key（域名）外再按归一化地址判重：同一接口填不同名称仍是同一个源，
+     * 混进来只会重复请求、在结果里产生重复线路。
+     */
+    const norm = (u: string) => u.trim().replace(/\/+$/, '').toLowerCase();
+    if (sources.some((s) => s.key === key || norm(s.api) === norm(api))) {
+      toast('该源已存在（相同域名或相同接口地址）');
       return;
+    }
+    /*
+     * 协议预检：用 ac=list 试探一次。这里放过 https://baidu.com 这类非 CMS
+     * 地址的话，用户只会在测速里看到一句「timeout」，完全猜不到是地址错了。
+     * 提前问一次接口，当场给出明确原因。
+     */
+    setAdding(true);
+    try {
+      const { json } = await httpGetJson<Record<string, unknown>>(buildApiUrl(api, { ac: 'list' }), 8000);
+      const looksLikeCms =
+        !!json && typeof json === 'object' && ('list' in json || 'code' in json);
+      if (!looksLikeCms) {
+        toast('该接口不是苹果 CMS（vod）协议，地址应形如 /api.php/provide/vod');
+        return;
+      }
+    } catch {
+      toast('无法访问该接口，请检查地址与网络');
+      return;
+    } finally {
+      setAdding(false);
     }
     addSource({ key, name, api, enabled: true } as SourceConfig);
     setForm({ name: '', api: '' });
     setShowAdd(false);
-    toast('已添加，正在后台验证');
+    toast(`已添加「${name}」`);
     void runProbe();
   };
 
@@ -124,9 +151,11 @@ export default function Settings() {
                 <div className="list-title">{s.name}</div>
                 <div className="list-desc" title={s.api}>
                   {probe
-                    ? probe.state === 'fail'
-                      ? `测速失败：${probe.error}`
-                      : `可用 · ${probe.ms}ms`
+                    ? probe.state === 'loading'
+                      ? '测速中…'
+                      : probe.state === 'fail'
+                        ? `测速失败：${probe.error}`
+                        : `可用 · ${probe.ms}ms`
                     : [
                         rec.avgMs ? `${Math.round(rec.avgMs)}ms` : null,
                         rate !== null ? `成功率 ${rate}%` : null,
@@ -268,8 +297,8 @@ export default function Settings() {
               <button className="btn" onClick={() => setShowAdd(false)}>
                 取消
               </button>
-              <button className="btn primary" onClick={submitAdd}>
-                添加
+              <button className="btn primary" disabled={adding} onClick={() => void submitAdd()}>
+                {adding ? '验证中…' : '添加'}
               </button>
             </div>
           </div>

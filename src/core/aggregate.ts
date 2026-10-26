@@ -179,6 +179,43 @@ export async function searchAll(keyword: string, opts: SearchOptions): Promise<S
 }
 
 /**
+ * 按 vodId 从单个源拉取详情条目（收藏 / 历史记录直进详情页用）。
+ *
+ * 这些入口本地就存着 sourceKey + vodId，为找回一部片向全部源发起
+ * 搜索太浪费——单源 ac=videolist&ids= 一次请求秒级返回。
+ * 返回 null 表示源不可用或该片已不在源里，调用方应回退到全量搜索。
+ */
+export async function fetchById(
+  source: SourceConfig,
+  vodId: string,
+  opts: { health: HealthStore; timeoutMs?: number },
+): Promise<AggregatedItem | null> {
+  if (!vodId) return null;
+  const t0 = Date.now();
+  const url = buildApiUrl(source.api, { ac: 'videolist', ids: vodId });
+  const { json } = await httpGetJson<RawVodResponse>(url, opts.timeoutMs ?? 12000);
+  if (!json) {
+    opts.health.recordFail(source.key);
+    return null;
+  }
+  const raw = extractList(json)[0];
+  opts.health.recordOk(source.key, Date.now() - t0);
+  const vod = raw ? toVodItem(raw, source) : null;
+  if (!vod) return null;
+  return {
+    key: normalizeName(vod.name),
+    name: vod.name,
+    pic: vod.pic,
+    remarks: vod.remarks,
+    year: vod.year,
+    typeName: vod.typeName,
+    score: vod.score,
+    shortDrama: vod.shortDrama,
+    variants: [vod],
+  };
+}
+
+/**
  * 快速探测一批源是否可用（设置页「测速」用）。
  * 用较短的超时，避免用户久等。
  */

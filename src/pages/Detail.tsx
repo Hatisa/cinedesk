@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import VodCard from '../components/VodCard';
 import { useToast } from '../components/Toast';
-import { getItem, putItems, recommendFor, searchAll, type AggregatedItem } from '../core';
+import { fetchById, getItem, putItems, recommendFor, searchAll, type AggregatedItem } from '../core';
 import { useApp } from '../state/AppState';
 
 export default function Detail() {
@@ -45,12 +45,29 @@ export default function Detail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  // 直接打开链接（或进程被回收后恢复）时缓存可能已失效，用片名重新搜索
+  // 直接打开链接（或进程被回收后恢复）时缓存可能已失效。
+  // 收藏/历史直进时 state 里带了 sourceKey+vodId，走单源详情查询即可（一次请求）；
+  // 单源拿不到（源挂了/已下架/未启用）才回退到按片名全量搜索。
   useEffect(() => {
     if (item || !name) return;
     let alive = true;
+    const meta = (loc.state as { meta?: { sourceKey: string; vodId: string } } | null)?.meta;
+    const source = meta ? sources.find((s) => s.key === meta.sourceKey) : undefined;
+
     setLoading(true);
-    (async () => {
+    void (async () => {
+      if (source && meta) {
+        const agg = await fetchById(source, meta.vodId, { health, timeoutMs: settings.timeoutMs });
+        if (!alive) return;
+        // key 必须与路由一致才采用；不一致说明源里该片已改名，走全量兜底
+        if (agg && agg.key === key) {
+          putItems([agg]);
+          persistHealth();
+          setItem(agg);
+          setLoading(false);
+          return;
+        }
+      }
       const res = await searchAll(name, { sources, health, timeoutMs: settings.timeoutMs });
       putItems(res.items);
       persistHealth();
@@ -125,9 +142,14 @@ export default function Detail() {
   if (!item) {
     return (
       <div className="page page-plain">
-        <button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav(-1)}>
-          <BackIcon />
-        </button>
+        <div className="detail-topbar">
+          <button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav(-1)}>
+            <BackIcon />
+          </button>
+          <button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav('/')}>
+            <HomeIcon />
+          </button>
+        </div>
         <div className="empty">
           <div className="empty-icon">📭</div>
           <div>未找到该影片</div>
@@ -163,14 +185,25 @@ export default function Detail() {
 
   return (
     <div className="page page-plain">
-      <button
-        className="icon-btn"
-        style={{ background: 'var(--bg-card)', marginBottom: 10 }}
-        onClick={() => nav(-1)}
-        aria-label="返回"
-      >
-        <BackIcon />
-      </button>
+      <div className="detail-topbar">
+        <button
+          className="icon-btn"
+          style={{ background: 'var(--bg-card)' }}
+          onClick={() => nav(-1)}
+          aria-label="返回"
+        >
+          <BackIcon />
+        </button>
+        {/* 层级深（详情→播放→详情…）且桌面浏览器没有实体返回键，给一条直达首页的兜底 */}
+        <button
+          className="icon-btn"
+          style={{ background: 'var(--bg-card)' }}
+          onClick={() => nav('/')}
+          aria-label="回到首页"
+        >
+          <HomeIcon />
+        </button>
+      </div>
 
       <div className="detail-hero">
         {item.pic && (
@@ -209,7 +242,14 @@ export default function Detail() {
       <div className="btn-row">
         <button className="btn primary" onClick={() => startPlay(lineIdx, continueFrom?.episodeIndex ?? 0)}>
           <PlayIcon />
-          {continueFrom ? `继续观看 第${continueFrom.episodeIndex + 1}集` : '播放'}
+          {continueFrom
+            ? (current?.lines[0]?.episodes.length ?? 0) > 1
+              ? continueFrom.position > 60
+                ? `第${continueFrom.episodeIndex + 1}集 从 ${fmtPos(continueFrom.position)} 继续`
+                : `继续观看 第${continueFrom.episodeIndex + 1}集`
+              : /* 电影没有集号，写「第1集」反而奇怪 */
+                '继续观看'
+            : '播放'}
         </button>
         <button
           className={`btn ghost${fav ? ' active' : ''}`}
@@ -297,6 +337,31 @@ export default function Detail() {
         </>
       )}
     </div>
+  );
+}
+
+/** 秒数格式化为 m:ss / h:mm:ss，用于「从 X 继续」按钮 */
+function fmtPos(sec: number): string {
+  const s = Math.floor(sec % 60);
+  const m = Math.floor((sec / 60) % 60);
+  const h = Math.floor(sec / 3600);
+  const ss = String(s).padStart(2, '0');
+  const mm = String(m).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
+
+function HomeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+      <path
+        d="M3 11l9-8 9 8M5 9.5V21h5v-6h4v6h5V9.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

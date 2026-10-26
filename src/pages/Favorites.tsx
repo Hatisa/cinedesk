@@ -7,9 +7,9 @@ export default function Favorites() {
   const { favorites, history, toggleFav, removeHistory, clearHistory } = useApp();
   const [tab, setTab] = useState<'fav' | 'history'>('fav');
 
-  const toDetail = (key: string, name: string, item?: unknown) => {
+  const toDetail = (key: string, name: string, meta?: { sourceKey: string; vodId: string }) => {
     nav(`/detail/${encodeURIComponent(key)}?name=${encodeURIComponent(name)}`, {
-      state: item ? { item } : undefined,
+      state: meta ? { meta } : undefined,
     });
   };
 
@@ -59,7 +59,7 @@ export default function Favorites() {
                   )}
                   <button
                     className="list-body"
-                    onClick={() => toDetail(f.key, f.name)}
+                    onClick={() => toDetail(f.key, f.name, { sourceKey: f.sourceKey, vodId: f.vodId })}
                     style={{ textAlign: 'left' }}
                   >
                     <div className="list-title">{f.name}</div>
@@ -115,7 +115,7 @@ export default function Favorites() {
                       )}
                       <button
                         className="list-body"
-                        onClick={() => toDetail(h.key, h.name)}
+                        onClick={() => toDetail(h.key, h.name, { sourceKey: h.sourceKey, vodId: h.vodId })}
                         style={{ textAlign: 'left' }}
                       >
                         <div className="list-title">{h.name}</div>
@@ -123,6 +123,11 @@ export default function Favorites() {
                           看到 {h.episodeName || `第${h.episodeIndex + 1}集`}
                           {pct > 0 ? ` · ${pct}%` : ''} · {h.sourceName}
                         </div>
+                        {pct > 0 && (
+                          <div className="list-progress">
+                            <div className="list-progress-fill" style={{ width: `${pct}%` }} />
+                          </div>
+                        )}
                       </button>
                       <button className="row-action" onClick={() => removeHistory(h.key)}>
                         删除
