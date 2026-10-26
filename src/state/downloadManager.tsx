@@ -10,6 +10,8 @@ import {
   allocShowDir,
   downloadEpisode,
   epDir,
+  fmtBytes,
+  fmtSpeed,
   startKeepAlive,
   stopKeepAlive,
   TaskQueue,
@@ -51,6 +53,8 @@ interface DownloadValue {
   isQueued: (key: string, epIndex: number) => boolean;
   /** 该集是否已缓存完成 */
   isCached: (key: string, epIndex: number) => boolean;
+  /** 取该集的任务（含进度），不在队列则返回 undefined */
+  taskOf: (key: string, epIndex: number) => DownloadTask | undefined;
 }
 
 /** 任务 id：一部剧 + 一集，全局唯一 */
@@ -164,6 +168,11 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     [offline],
   );
 
+  const taskOf = useCallback(
+    (key: string, epIndex: number) => tasks.find((t) => t.id === jobId(key, epIndex)),
+    [tasks],
+  );
+
   /*
    * 后台保活：有任务在跑就开前台服务。
    *
@@ -179,12 +188,18 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     else void stopKeepAlive();
   }, [hasActive]);
 
-  // 进度文案：锁屏时用户靠这条通知看进展
+  /*
+   * 进度文案：锁屏时用户靠这条通知看进展。
+   * 带上百分比、已下体积与速度 —— 只有「正在缓存」四个字时，
+   * 用户无法区分「在下」和「卡住了」，这正是之前的体验问题。
+   */
   const running = tasks.find((t) => t.status === 'running');
   const progressText = running
     ? running.total > 0
-      ? `第 ${running.payload.epIndex + 1} 集 ${Math.floor((running.done / running.total) * 100)}%`
-      : `第 ${running.payload.epIndex + 1} 集 准备中`
+      ? `第 ${running.payload.epIndex + 1} 集 ${Math.floor((running.done / running.total) * 100)}% · ${fmtBytes(
+          running.bytes,
+        )}${running.speed > 0 ? ` · ${fmtSpeed(running.speed)}` : ''}`
+      : `第 ${running.payload.epIndex + 1} 集 解析分片中…`
     : '等待开始缓存';
 
   useEffect(() => {
@@ -192,8 +207,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   }, [hasActive, progressText]);
 
   const value = useMemo<DownloadValue>(
-    () => ({ tasks, enqueue, cancel, retry, clearFinished, isQueued, isCached }),
-    [tasks, enqueue, cancel, retry, clearFinished, isQueued, isCached],
+    () => ({ tasks, enqueue, cancel, retry, clearFinished, isQueued, isCached, taskOf }),
+    [tasks, enqueue, cancel, retry, clearFinished, isQueued, isCached, taskOf],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -106,7 +106,7 @@ test('取消后迟到的进度回调不改回状态', async () => {
    * 用对象承载回调：变量只在异步回调里被赋值，直接写成变量的话
    * TS 会在调用点把它收窄成 null，误报「不可调用」。
    */
-  const box: { push: ((d: number, t: number, b: number) => void) | null } = { push: null };
+  const box: { push: ((d: number, t: number, b: number, s: number) => void) | null } = { push: null };
   const q = new TaskQueue<string>({
     run: (_p, progress) => {
       box.push = progress;
@@ -122,7 +122,7 @@ test('取消后迟到的进度回调不改回状态', async () => {
   assert.equal(q.find('a')?.status, 'cancelled');
 
   // 下载器可能还会回调一次进度，此时必须被丢弃
-  box.push?.(3, 10, 300);
+  box.push?.(3, 10, 300, 1200);
   assert.equal(q.find('a')?.status, 'cancelled');
   assert.equal(q.find('a')?.done, 0, '取消后进度不应再变化');
 });

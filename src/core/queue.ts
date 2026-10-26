@@ -22,6 +22,8 @@ export interface QueueTask<T> {
   /** 总分片数；0 表示播放列表还没解析出来 */
   total: number;
   bytes: number;
+  /** 平均下载速度（字节/秒），用于界面显示「1.2 MB/s」 */
+  speed: number;
   error?: string;
   payload: T;
 }
@@ -30,7 +32,7 @@ export interface QueueOptions<T> {
   /** 执行一个任务；progress 用于回报进度，signal 用于取消 */
   run: (
     payload: T,
-    progress: (done: number, total: number, bytes: number) => void,
+    progress: (done: number, total: number, bytes: number, speed: number) => void,
     signal: AbortSignal,
   ) => Promise<void>;
   /** 任务列表变化后的回调，用于同步到界面 */
@@ -71,7 +73,7 @@ export class TaskQueue<T> {
     if (this.has(id)) return;
     this.list = [
       ...this.list.filter((t) => t.id !== id),
-      { id, payload, status: 'waiting', done: 0, total: 0, bytes: 0 },
+      { id, payload, status: 'waiting', done: 0, total: 0, bytes: 0, speed: 0 },
     ];
     this.emit();
     void this.pump();
@@ -137,10 +139,10 @@ export class TaskQueue<T> {
     try {
       await this.opts.run(
         payload,
-        (done, total, bytes) => {
+        (done, total, bytes, speed) => {
           // 取消后迟到的进度回调丢弃，否则界面上会「取消完又跳一下」
           if (this.find(id)?.status !== 'running') return;
-          this.update(id, { done, total, bytes });
+          this.update(id, { done, total, bytes, speed });
         },
         ctrl.signal,
       );

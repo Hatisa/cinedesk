@@ -13,6 +13,7 @@ export * from './recommend';
 export * from './hlsLoader';
 export * from './m3u8';
 export * from './aes';
+export * from './deadline';
 export * from './fs';
 export * from './download';
 export * from './offline';

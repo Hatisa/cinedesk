@@ -13,7 +13,7 @@ export default function Detail() {
   const loc = useLocation();
   const toast = useToast();
   const { sources, health, settings, history, toggleFav, isFavorite, persistHealth } = useApp();
-  const { enqueue, isQueued, isCached } = useDownload();
+  const { enqueue, isQueued, isCached, taskOf } = useDownload();
   /** 缓存选择模式：开启后点选集是把该集加入缓存，而不是直接播放 */
   const [cacheMode, setCacheMode] = useState(false);
   /** 缓存模式下已勾选的集号 */
@@ -389,6 +389,13 @@ export default function Detail() {
           const done = isCached(item.key, ep.index);
           const queued = isQueued(item.key, ep.index);
           const pickedNow = picked.has(ep.index);
+          /*
+           * 下载中的集直接显示百分比。
+           * 用户点完缓存会退到这一页看选集，看不见进度就会怀疑没生效
+           * ——「点了没反应」是最容易让人放弃的体验。
+           */
+          const task = queued ? taskOf(item.key, ep.index) : undefined;
+          const epPct = task && task.total > 0 ? Math.floor((task.done / task.total) * 100) : 0;
           const cls = [
             'ep-btn',
             ep.index === epIdx && !cacheMode ? 'active' : '',
@@ -424,7 +431,9 @@ export default function Detail() {
             >
               {ep.name}
               {done && <span className="ep-flag">已存</span>}
-              {queued && <span className="ep-flag">下载中</span>}
+              {queued && (
+                <span className="ep-flag">{epPct > 0 ? `${epPct}%` : '下载中'}</span>
+              )}
             </button>
           );
         })}

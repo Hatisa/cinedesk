@@ -22,7 +22,7 @@
 // 相对导入必须带 .ts 扩展名：这些模块会被 node --test 直接加载，
 // Node 的 ESM 解析不做扩展名补全（与 Vite 的行为不同）。
 import { aes128CbcDecrypt, parseIv } from './aes.ts';
-import { sizeOf, writeBinary } from './fs.ts';
+import { ensureDir, sizeOf, writeBinary } from './fs.ts';
 import { httpGetBinary, httpGetText } from './http.ts';
 import {
   extOf,
@@ -46,8 +46,13 @@ export interface EpisodeDownloadOpts {
   /** 相对缓存根目录的该集目录，如 "庆余年 第一季/第001集" */
   dir: string;
   quality: Quality;
-  /** 进度回调：已完成分片数 / 总分片数 / 累计字节 */
-  onProgress?: (done: number, total: number, bytes: number) => void;
+  /**
+   * 进度回调：已完成分片数 / 总分片数 / 累计字节 / 平均速度（字节每秒）。
+   *
+   * 解析出分片清单后会**立刻先回调一次**（done=0），界面因此能马上
+   * 显示「0/477」而不是停在「准备中」。
+   */
+  onProgress?: (done: number, total: number, bytes: number, speed: number) => void;
   signal?: AbortSignal;
   concurrency?: number;
   retries?: number;
@@ -71,6 +76,8 @@ export interface DownloadDeps {
   getBinary: (url: string) => Promise<{ ok: boolean; status: number; data: ArrayBuffer | null; error?: string }>;
   sizeOf: (path: string) => Promise<number>;
   writeBinary: (path: string, data: ArrayBuffer) => Promise<void>;
+  /** 预先建好该集的目录；writeBinary 自带 recursive，这里只是冗余保险 */
+  ensureDir?: (path: string) => Promise<void>;
 }
 
 const realDeps: DownloadDeps = {
@@ -78,6 +85,7 @@ const realDeps: DownloadDeps = {
   getBinary: (url) => httpGetBinary(url, FETCH_TIMEOUT),
   sizeOf,
   writeBinary,
+  ensureDir,
 };
 
 /**
@@ -123,6 +131,13 @@ export async function downloadEpisode(
   if (media.live) throw new Error('直播源无法缓存');
   if (!media.segments.length) throw new Error('播放列表里没有分片');
 
+  /*
+   * 预建该集目录。
+   * writeBinary 已带 recursive，但插件的 recursive 针对的是「文件不存在的父目录」，
+   * 显式建一次能把「目录没建好导致写入整集失败」这种不确定性排除掉。
+   */
+  await deps.ensureDir?.(dir);
+
   const total = media.segments.length;
   // 集内序号零填充，保证文件管理器里也是播出顺序
   const names = media.segments.map((s, i) => `seg-${pad(i + 1, 6)}${extOf(s.url)}`);
@@ -150,6 +165,26 @@ export async function downloadEpisode(
   let done = 0;
   let bytes = 0;
 
+  /*
+   * 进度上报的两条规则，都是为了「让用户看得见」：
+   *   1) 总分片数一确定就立刻报一次 —— 否则在第一个分片写完前（真机上
+   *      可达数秒），界面和通知栏只能显示「准备中」，看起来像卡死了；
+   *   2) 之后按 300ms 节流 —— 分片常有数百片，每片都刷一遍会让通知栏
+   *      高频重建、界面掉帧，用户反而看不出进度在动。
+   * 速度用「累计字节 ÷ 已耗时」，比逐片瞬时速度稳定，不会来回跳。
+   */
+  const startedAt = Date.now();
+  let lastEmit = 0;
+  const emit = (force = false): void => {
+    if (!onProgress) return;
+    const now = Date.now();
+    if (!force && done < total && now - lastEmit < 300) return;
+    lastEmit = now;
+    const secs = Math.max(0.05, (now - startedAt) / 1000);
+    onProgress(done, total, bytes, bytes / secs);
+  };
+  emit(true);
+
   const worker = async (): Promise<void> => {
     for (;;) {
       if (signal?.aborted) throw new DOMException('下载已取消', 'AbortError');
@@ -175,11 +210,13 @@ export async function downloadEpisode(
         bytes += buf.byteLength;
       }
       done += 1;
-      onProgress?.(done, total, bytes);
+      emit(done >= total);
     }
   };
 
   await Promise.all(Array.from({ length: Math.min(concurrency, total) }, () => worker()));
+  // 收尾再报一次：节流可能吞掉最后一片，确保界面停在 100%
+  emit(true);
 
   const segments: LocalSegment[] = names.map((name, i) => ({
     name,
@@ -214,4 +251,10 @@ export function fmtBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+/** 速度文案，如「1.2 MB/s」；速度未知时返回空串 */
+export function fmtSpeed(bytesPerSec: number): string {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return '';
+  return `${fmtBytes(bytesPerSec)}/s`;
 }

@@ -15,7 +15,7 @@
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { epDir, fmtBytes, removeDir, totalBytes, totalEpisodes } from '../core';
+import { epDir, fmtBytes, fmtSpeed, removeDir, totalBytes, totalEpisodes } from '../core';
 import { useApp } from '../state/AppState';
 import { useDownload } from '../state/downloadManager';
 
@@ -76,8 +76,18 @@ export default function Downloads() {
       {(active.length > 0 || finished.length > 0) && (
         <div className="list">
           {[...active, ...finished].map((t) => {
+            /*
+             * 进度百分比、体积、速度三者都给出来。
+             * 只显示「已下 N 片」时，几百片的任务看起来几乎不动，用户
+             * 会以为卡死了；速度能立刻回答「到底有没有在走」。
+             */
             const pct =
-              t.total > 0 ? Math.min(100, Math.round((t.done / t.total) * 100)) : t.status === 'done' ? 100 : 0;
+              t.total > 0
+                ? Math.min(100, Math.round((t.done / t.total) * 100))
+                : t.status === 'done'
+                  ? 100
+                  : 0;
+            const speed = fmtSpeed(t.speed);
             return (
               <div className="list-row" key={t.id}>
                 <div className="list-thumb" />
@@ -85,9 +95,13 @@ export default function Downloads() {
                   <div className="list-title">{t.payload.name}</div>
                   <div className="list-desc">
                     {t.payload.epName}
-                    {t.status === 'waiting' && ' · 等待中'}
+                    {t.status === 'waiting' && ' · 排队等待中'}
                     {t.status === 'running' &&
-                      (t.total > 0 ? ` · ${t.done}/${t.total} 分片 · ${fmtBytes(t.bytes)}` : ' · 解析中…')}
+                      (t.total > 0
+                        ? ` · ${pct}%（${t.done}/${t.total} 分片） · ${fmtBytes(t.bytes)}${
+                            speed ? ` · ${speed}` : ''
+                          }`
+                        : ' · 正在解析分片列表…')}
                     {t.status === 'done' && ` · 已完成 ${fmtBytes(t.bytes)}`}
                     {t.status === 'cancelled' && ' · 已取消'}
                     {t.status === 'failed' && ` · 失败：${t.error ?? '未知错误'}`}

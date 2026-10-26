@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ivFromSeq } from './aes.ts';
-import { downloadEpisode, fmtBytes, resolveMedia, type DownloadDeps } from './download.ts';
+import { downloadEpisode, fmtBytes, fmtSpeed, resolveMedia, type DownloadDeps } from './download.ts';
 
 /** 用同一套 WebCrypto 加密，构造测试用的密文 */
 async function encryptCbc(
@@ -288,4 +288,47 @@ test('体积格式化', () => {
   assert.equal(fmtBytes(2048), '2 KB');
   assert.equal(fmtBytes(5 * 1024 * 1024), '5.0 MB');
   assert.equal(fmtBytes(3 * 1024 * 1024 * 1024), '3.00 GB');
+});
+
+test('速度格式化，未知速度返回空串', () => {
+  // KB 档沿用 fmtBytes 的取整口径（1536 B → 2 KB）
+  assert.equal(fmtSpeed(1536), '2 KB/s');
+  assert.equal(fmtSpeed(2 * 1024 * 1024), '2.0 MB/s');
+  assert.equal(fmtSpeed(0), '');
+  assert.equal(fmtSpeed(Number.NaN), '');
+});
+
+test('解析完立刻上报一次进度，界面不会停在「准备中」', async () => {
+  /*
+   * 这是真机上「通知栏一直显示准备中」的修复点。
+   * 原先只有第一个分片写完之后才回调，在那之前 total 恒为 0，
+   * 界面只能显示「准备中」；若首个分片因故卡住，就永远停在准备中。
+   * 现在解析出分片清单后立即以 done=0 上报，用户马上能看到总数。
+   */
+  const t = makeDeps();
+  const seen: Array<{ done: number; total: number }> = [];
+  await downloadEpisode(SRC, {
+    dir: '剧/第001集',
+    quality: 'high',
+    deps: t.deps,
+    onProgress: (done, total) => seen.push({ done, total }),
+  });
+
+  assert.ok(seen.length > 0, '应至少回调一次');
+  assert.equal(seen[0].done, 0, '第一次回调必须在任何分片完成之前');
+  assert.equal(seen[0].total, 6, '第一次回调就要带上总分片数');
+  assert.equal(seen.at(-1)?.done, 6, '最终进度到满');
+});
+
+test('进度回调带出速度，且速度为正数', async () => {
+  const t = makeDeps();
+  const speeds: number[] = [];
+  await downloadEpisode(SRC, {
+    dir: '剧/第001集',
+    quality: 'high',
+    deps: t.deps,
+    onProgress: (_d, _t, _b, speed) => speeds.push(speed),
+  });
+  assert.ok(speeds.length > 0);
+  assert.ok(speeds.every((s) => Number.isFinite(s) && s >= 0), '速度必须是有限非负数');
 });
