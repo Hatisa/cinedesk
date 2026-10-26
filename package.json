@@ -11,16 +11,19 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test \"src/**/*.test.ts\"",
     "gen:icon": "node scripts/gen-icon.mjs",
+    "patch:android": "node scripts/patch-android.mjs",
     "cap:add": "cap add android",
     "cap:sync": "npm run build && cap sync android",
-    "apk:debug": "npm run build && cap sync android && cd android && gradlew.bat assembleDebug"
+    "apk:debug": "npm run build && cap sync android && npm run patch:android && cd android && gradlew.bat assembleDebug"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.3",
     "@capacitor/app": "^7.1.2",
     "@capacitor/core": "^7.4.3",
+    "@capacitor/filesystem": "^7.1.9",
     "@capacitor/preferences": "^7.0.4",
     "@capacitor/screen-orientation": "^7.0.4",
+    "@capawesome-team/capacitor-android-foreground-service": "^7.0.1",
     "hls.js": "^1.6.15",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

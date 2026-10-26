@@ -29,6 +29,14 @@ import {
   reconcileSources,
   saveJSON,
   toggleFavorite,
+  loadOffline,
+  saveOffline,
+  removeEpisode as dropOfflineEpisode,
+  removeShow as dropOfflineShow,
+  upsertEpisode as addOfflineEpisode,
+  findEpisode as findOfflineEpisode,
+  type OfflineEpisode,
+  type OfflineShow,
   type FavoriteEntry,
   type HealthRecord,
   type HistoryEntry,
@@ -52,6 +60,8 @@ interface AppState {
   history: HistoryEntry[];
   favorites: FavoriteEntry[];
   settings: Settings;
+  /** 离线缓存索引（哪部剧缓存了哪几集） */
+  offline: OfflineShow[];
   /** 最近一次搜索的快照；null 表示当前没有可恢复的结果 */
   search: SearchSnapshot | null;
   setSearch: (s: SearchSnapshot | null) => void;
@@ -66,6 +76,19 @@ interface AppState {
   clearHistory: () => void;
   toggleFav: (entry: FavoriteEntry) => void;
   isFavorite: (key: string) => boolean;
+  /** 写入/覆盖一集的缓存记录 */
+  saveOfflineEpisode: (
+    show: { key: string; name: string; pic: string; year: string; typeName: string; showDir?: string },
+    ep: OfflineEpisode,
+  ) => void;
+  /** 删除一集的缓存记录（分片文件由调用方清理） */
+  dropOffline: (key: string, epIndex: number) => void;
+  /** 删除整部剧的缓存记录 */
+  dropOfflineAll: (key: string) => void;
+  /** 查该集是否已缓存；播放页据此直接走本地，避免无网时先等在线超时 */
+  cachedEpisode: (key: string, epIndex: number) => OfflineEpisode | undefined;
+  /** 在设置页改为立即生效 */
+  setOffline: (next: OfflineShow[]) => void;
   persistHealth: () => void;
   resetHealth: () => void;
 }
@@ -78,6 +101,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [favorites, setFavorites] = useState<FavoriteEntry[]>([]);
   const [settings, setSettingsState] = useState<Settings>(DEFAULT_SETTINGS);
+  const [offline, setOfflineState] = useState<OfflineShow[]>([]);
   const [search, setSearchState] = useState<SearchSnapshot | null>(null);
   const healthRef = useRef(new HealthStore());
 
@@ -85,12 +109,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [srcs, health, hist, favs, cfg] = await Promise.all([
+      const [srcs, health, hist, favs, cfg, off] = await Promise.all([
         loadSources(defaultSources()),
         loadHealth(),
         loadHistory(),
         loadFavorites(),
         loadSettings(),
+        loadOffline(),
       ]);
       if (!alive) return;
       healthRef.current = new HealthStore(health as Record<string, HealthRecord>);
@@ -104,6 +129,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       void saveJSON(KEYS.sources, merged);
       setHistory(hist);
       setFavorites(favs);
+      setOfflineState(off);
       setSettingsState({ ...DEFAULT_SETTINGS, ...cfg });
       setReady(true);
     })();
@@ -210,6 +236,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const isFavorite = useCallback((key: string) => favorites.some((f) => f.key === key), [favorites]);
 
+  /*
+   * 离线索引的写入统一走「先算新值、再落盘、再更新 state」。
+   * 直接读 offline 做闭包计算会拿到陈旧值：下载是异步的，一次批量缓存
+   * 多集时会连续调用，前后两次基于同一个旧数组，后写的会把先写的顶掉。
+   */
+  const setOffline = useCallback((next: OfflineShow[]) => {
+    setOfflineState(next);
+    void saveOffline(next);
+  }, []);
+
+  const saveOfflineEpisode = useCallback<AppState['saveOfflineEpisode']>((show, ep) => {
+    setOfflineState((prev) => {
+      const next = addOfflineEpisode(prev, show, ep);
+      void saveOffline(next);
+      return next;
+    });
+  }, []);
+
+  const dropOffline = useCallback((key: string, epIndex: number) => {
+    setOfflineState((prev) => {
+      const next = dropOfflineEpisode(prev, key, epIndex);
+      void saveOffline(next);
+      return next;
+    });
+  }, []);
+
+  const dropOfflineAll = useCallback((key: string) => {
+    setOfflineState((prev) => {
+      const next = dropOfflineShow(prev, key);
+      void saveOffline(next);
+      return next;
+    });
+  }, []);
+
+  /** 读当前索引即可：offline 是 state，随写入同步更新 */
+  const cachedEpisode = useCallback(
+    (key: string, epIndex: number) => findOfflineEpisode(offline, key, epIndex),
+    [offline],
+  );
+
   const resetHealth = useCallback(() => {
     healthRef.current.reset();
     persistHealth();
@@ -223,6 +289,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       history,
       favorites,
       settings,
+      offline,
       search,
       setSearch,
       setSources,
@@ -236,13 +303,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       clearHistory,
       toggleFav,
       isFavorite,
+      saveOfflineEpisode,
+      dropOffline,
+      dropOfflineAll,
+      cachedEpisode,
+      setOffline,
       persistHealth,
       resetHealth,
     }),
     [
-      ready, sources, history, favorites, settings, search, setSearch, setSources, addSource,
+      ready, sources, history, favorites, settings, offline, search, setSearch, setSources, addSource,
       updateSource, removeSource, resetSources, setSettings, rememberPlay, removeHistory,
-      clearHistory, toggleFav, isFavorite, persistHealth, resetHealth,
+      clearHistory, toggleFav, isFavorite, saveOfflineEpisode, dropOffline, dropOfflineAll,
+      cachedEpisode, setOffline, persistHealth, resetHealth,
     ],
   );
 

@@ -117,6 +117,66 @@ export async function httpGetJson<T = unknown>(
 }
 
 /**
+ * 发起 GET 并返回二进制内容。
+ *
+ * 注意：Android 上 CapacitorHttp 的 arraybuffer 响应实际是 base64 字符串，
+ * 必须解码后才是真正的字节——直接当 ArrayBuffer 用会写出损坏文件。
+ * 这里与 hlsLoader 的处理保持一致。
+ */
+export async function httpGetBinary(
+  url: string,
+  timeoutMs = 20000,
+  extraHeaders: Record<string, string> = {},
+): Promise<{ ok: boolean; status: number; data: ArrayBuffer | null; error?: string }> {
+  const headers: Record<string, string> = {
+    'User-Agent': UA,
+    Accept: '*/*',
+    ...extraHeaders,
+  };
+
+  if (isNative()) {
+    try {
+      const res = await CapacitorHttp.get({
+        url,
+        headers,
+        connectTimeout: timeoutMs,
+        readTimeout: timeoutMs,
+        responseType: 'arraybuffer',
+      });
+      if (res.status < 200 || res.status >= 300) {
+        return { ok: false, status: res.status, data: null };
+      }
+      const raw = typeof res.data === 'string' ? res.data : '';
+      return { ok: true, status: res.status, data: raw ? b64ToBuf(raw) : null };
+    } catch (e) {
+      return { ok: false, status: 0, data: null, error: errText(e) };
+    }
+  }
+
+  const target = import.meta.env.DEV
+    ? `${location.origin}/__proxy?url=${encodeURIComponent(url)}`
+    : url;
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), timeoutMs);
+    const res = await fetch(target, { headers, signal: ctl.signal });
+    clearTimeout(timer);
+    if (!res.ok) return { ok: false, status: res.status, data: null };
+    return { ok: true, status: res.status, data: await res.arrayBuffer() };
+  } catch (e) {
+    return { ok: false, status: 0, data: null, error: errText(e) };
+  }
+}
+
+function b64ToBuf(b64: string): ArrayBuffer {
+  const clean = b64.replace(/[\s\r\n]/g, '');
+  const bin = atob(clean);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+
+/**
  * 拼接采集接口的查询参数。
  * 绝大多数源用 ?ac=videolist&wd=xxx；部分源接口自带 query，需要正确追加。
  */

@@ -5,6 +5,8 @@
  * 在浏览器里自动退回 localStorage。所有数据都留在设备本地，不上传任何服务器。
  */
 import { Preferences } from '@capacitor/preferences';
+// 仅类型导入：Quality 是缓存的清晰度档位，定义在下载引擎里
+import type { Quality } from './download';
 import type { FavoriteEntry, HealthRecord, HistoryEntry, SourceConfig } from './types';
 
 export const KEYS = {
@@ -14,6 +16,7 @@ export const KEYS = {
   favorites: 'cinedesk.favorites.v1',
   settings: 'cinedesk.settings.v1',
   recent: 'cinedesk.recent.v1',
+  offline: 'cinedesk.offline.v1',
 } as const;
 
 export interface Settings {
@@ -21,11 +24,18 @@ export interface Settings {
   timeoutMs: number;
   /** 观看历史是否记录 */
   recordHistory: boolean;
+  /**
+   * 离线缓存使用的清晰度档位。
+   * 默认最高：缓存是「下载一次长期离线看」，画质优先于体积；
+   * 存储紧张的用户可在设置里降到中/低。
+   */
+  cacheQuality: Quality;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   timeoutMs: 12000,
   recordHistory: true,
+  cacheQuality: 'high',
 };
 
 export async function loadJSON<T>(key: string, fallback: T): Promise<T> {

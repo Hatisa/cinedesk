@@ -4,6 +4,7 @@ import VodCard from '../components/VodCard';
 import { useToast } from '../components/Toast';
 import { fetchById, getItem, putItems, recommendFor, searchAll, type AggregatedItem } from '../core';
 import { useApp } from '../state/AppState';
+import { useDownload } from '../state/downloadManager';
 
 export default function Detail() {
   const { key = '' } = useParams();
@@ -12,6 +13,11 @@ export default function Detail() {
   const loc = useLocation();
   const toast = useToast();
   const { sources, health, settings, history, toggleFav, isFavorite, persistHealth } = useApp();
+  const { enqueue, isQueued, isCached } = useDownload();
+  /** 缓存选择模式：开启后点选集是把该集加入缓存，而不是直接播放 */
+  const [cacheMode, setCacheMode] = useState(false);
+  /** 缓存模式下已勾选的集号 */
+  const [picked, setPicked] = useState<Set<number>>(new Set());
 
   const passed = (loc.state as { item?: AggregatedItem } | null)?.item;
   const [item, setItem] = useState<AggregatedItem | null>(passed ?? getItem(key));
@@ -169,6 +175,62 @@ export default function Detail() {
     );
   };
 
+  /**
+   * 只有 HLS 分片能缓存。
+   *
+   * 缓存走的是「下载播放列表 → 逐个拉分片」，因此必须拿到 .m3u8 地址。
+   * 部分线路只给出播放页地址（需二次解析才能得到真实地址），这类无法
+   * 直接缓存——若放进去，下载会在解析阶段失败，用户只会看到一条莫名其妙的错误。
+   */
+  const canCache = (url: string): boolean => /\.m3u8(\?|#|$)/i.test(url);
+
+  /** 把选中的集加入缓存队列 */
+  const cachePicked = () => {
+    const line = current?.lines[0];
+    if (!item || !current || !line || !picked.size) return;
+
+    const jobs = [...picked]
+      .sort((a, b) => a - b)
+      .map((i) => {
+        const ep = line.episodes[i];
+        return ep && {
+          key: item.key,
+          name: item.name,
+          pic: item.pic,
+          year: item.year,
+          typeName: item.typeName,
+          epIndex: ep.index,
+          epName: ep.name,
+          url: ep.url,
+          sourceKey: current.sourceKey,
+          sourceName: current.sourceName,
+          lineName: line.name,
+        };
+      })
+      .filter((j): j is NonNullable<typeof j> => !!j && canCache(j.url));
+
+    if (!jobs.length) {
+      toast('选中的剧集暂不支持缓存（片源未提供分片地址）');
+      return;
+    }
+    enqueue(jobs);
+    toast(
+      jobs.length < picked.size
+        ? `已加入缓存队列 ${jobs.length} 集，其余 ${picked.size - jobs.length} 集暂不支持缓存`
+        : `已加入缓存队列 ${jobs.length} 集，可在「缓存」页查看进度`,
+    );
+    setPicked(new Set());
+    setCacheMode(false);
+  };
+
+  /** 全选/取消全选：只勾可缓存的集，避免用户白选一通再被过滤 */
+  const togglePickAll = () => {
+    const line = current?.lines[0];
+    if (!line) return;
+    const usable = line.episodes.filter((e) => canCache(e.url)).map((e) => e.index);
+    setPicked((prev) => (prev.size >= usable.length ? new Set() : new Set(usable)));
+  };
+
   /*
    * 点「猜你喜欢」里的一部影片。
    *
@@ -290,20 +352,82 @@ export default function Detail() {
         ))}
       </div>
 
-      <div className="group-title">选集</div>
+      <div className="group-title">
+        选集
+        {/*
+          缓存入口放在选集标题行内：用户想缓存时的心理动作就是
+          「翻到选集这里选几集」，入口在同一条视线里最省事。
+        */}
+        <button className="group-action" onClick={() => setCacheMode((v) => !v)} type="button">
+          {cacheMode ? '取消缓存' : '缓存'}
+        </button>
+      </div>
+
+      {cacheMode && (
+        <div className="cache-bar">
+          <span className="cache-bar-tip">
+            点选要缓存的剧集（可多选），已缓存与正在下载的不可重复选
+          </span>
+          <div className="cache-bar-btns">
+            <button className="row-action" onClick={togglePickAll} type="button">
+              全选
+            </button>
+            <button
+              className="btn primary cache-go"
+              onClick={cachePicked}
+              disabled={!picked.size}
+              type="button"
+            >
+              缓存 {picked.size ? `(${picked.size})` : ''}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="ep-grid">
-        {current?.lines[0]?.episodes.map((ep) => (
-          <button
-            key={ep.index}
-            className={`ep-btn${ep.index === epIdx ? ' active' : ''}`}
-            onClick={() => {
-              setEpIdx(ep.index);
-              startPlay(lineIdx, ep.index);
-            }}
-          >
-            {ep.name}
-          </button>
-        ))}
+        {current?.lines[0]?.episodes.map((ep) => {
+          const done = isCached(item.key, ep.index);
+          const queued = isQueued(item.key, ep.index);
+          const pickedNow = picked.has(ep.index);
+          const cls = [
+            'ep-btn',
+            ep.index === epIdx && !cacheMode ? 'active' : '',
+            pickedNow ? 'picked' : '',
+            done ? 'cached' : '',
+            queued ? 'queued' : '',
+          ]
+            .filter(Boolean)
+            .join(' ');
+          return (
+            <button
+              key={ep.index}
+              className={cls}
+              disabled={queued}
+              onClick={() => {
+                if (!cacheMode) {
+                  setEpIdx(ep.index);
+                  startPlay(lineIdx, ep.index);
+                  return;
+                }
+                // 已缓存的集不再勾选，避免重复下载白白耗流量
+                if (done) {
+                  toast('该集已缓存');
+                  return;
+                }
+                setPicked((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(ep.index)) next.delete(ep.index);
+                  else next.add(ep.index);
+                  return next;
+                });
+              }}
+            >
+              {ep.name}
+              {done && <span className="ep-flag">已存</span>}
+              {queued && <span className="ep-flag">下载中</span>}
+            </button>
+          );
+        })}
       </div>
 
       {current && current.lines.length > 1 && (
