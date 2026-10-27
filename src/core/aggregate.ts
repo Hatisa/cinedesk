@@ -1,18 +1,8 @@
-/**
- * 多源并发聚合。
- *
- * 这是「稳定」的全部来源。实测同一批源里约 1/3 在任意时刻不可用，
- * 且哪些可用会随时间变化，所以做法不是挑一个「最好的源」，而是：
- *
- *   1. 并发向所有启用的源发起搜索，互不阻塞——慢源不会拖住快源；
- *   2. 按 health.ts 的健康评分排序，好源优先、坏源沉底；
- *   3. 同名影片跨源合并为一条，内部保留所有可用线路，播放失败可一键换源；
- *   4. 每次结果都回收为健康度，让排序随真实表现自我修正。
- */
-import { extractList, toVodItem } from './cms';
-import { contentRank, normalizeName } from './filter';
-import { buildApiUrl, httpGetJson } from './http';
-import { HealthStore, sortByHealth } from './health';
+import { extractList, toVodItem } from './cms.ts';
+import { contentRank } from './filter.ts';
+import { buildApiUrl, httpGetJson } from './http.ts';
+import { HealthStore, sortByHealth } from './health.ts';
+import { canAddVariant, compatibleWork, titleRelevance, workKeyFor, workVariantKey } from './work.ts';
 import type {
   AggregatedItem,
   RawVodResponse,
@@ -26,9 +16,9 @@ export interface SearchOptions {
   sources: SourceConfig[];
   health: HealthStore;
   timeoutMs?: number;
-  /** 每拿到一个源的结果就回调一次，用于界面渐进式展示 */
+  signal?: AbortSignal;
   onStatus?: (status: SourceStatus) => void;
-  /** 每完成一个源就回调，用于边搜边出结果 */
+  /** 每完成一个源，就提供按当前结果重新聚合、排序的不可变快照。 */
   onPartial?: (items: AggregatedItem[], statuses: SourceStatus[]) => void;
 }
 
@@ -41,34 +31,27 @@ interface SourceOutcome {
 async function queryOne(source: SourceConfig, keyword: string, opts: SearchOptions): Promise<SourceOutcome> {
   const t0 = Date.now();
   opts.onStatus?.({ key: source.key, name: source.name, state: 'loading', count: 0, ms: 0 });
-
   const url = buildApiUrl(source.api, { ac: 'videolist', wd: keyword });
-  const { json, result } = await httpGetJson<RawVodResponse>(url, opts.timeoutMs ?? 12000);
+  const { json, result } = await httpGetJson<RawVodResponse>(
+    url,
+    opts.timeoutMs ?? 12000,
+    {},
+    opts.signal,
+  );
   const ms = Date.now() - t0;
-
-  // 接口不通：记失败，让健康分下降
+  if (result.error === 'cancelled' || opts.signal?.aborted) {
+    return { source, items: [], status: { key: source.key, name: source.name, state: 'fail', count: 0, ms, error: 'cancelled' } };
+  }
   if (!json) {
     opts.health.recordFail(source.key);
-    const status: SourceStatus = {
-      key: source.key,
-      name: source.name,
-      state: 'fail',
-      count: 0,
-      ms,
-      error: result.error || `HTTP ${result.status || '???'}`,
-    };
+    const status: SourceStatus = { key: source.key, name: source.name, state: 'fail', count: 0, ms, error: result.error || `HTTP ${result.status || '???'}` };
     opts.onStatus?.(status);
     return { source, items: [], status };
   }
-
-  const rawList = extractList(json);
-  const items = rawList
+  const items = extractList(json)
     .map((r) => toVodItem(r, source))
     .filter((v): v is VodItem => v !== null);
-
-  // 接口返回 200 且结构合法 → 源是健康的，即使没搜到片子
   opts.health.recordOk(source.key, ms);
-
   const status: SourceStatus = {
     key: source.key,
     name: source.name,
@@ -80,159 +63,132 @@ async function queryOne(source: SourceConfig, keyword: string, opts: SearchOptio
   return { source, items, status };
 }
 
-/** 跨源合并同名影片 */
-function mergeItems(outcomes: SourceOutcome[], health: HealthStore): AggregatedItem[] {
-  const map = new Map<string, AggregatedItem>();
-
+/** 同名同年的跨源副本可以合并；年份冲突、同源不同ID必须保留独立版本。 */
+export function mergeItems(outcomes: SourceOutcome[], health: HealthStore): AggregatedItem[] {
+  const groups: AggregatedItem[] = [];
   for (const { items } of outcomes) {
     for (const item of items) {
-      const key = normalizeName(item.name);
-      if (!key) continue;
-      let agg = map.get(key);
+      let agg = groups.find((g) => compatibleWork(g, item) && canAddVariant(g, item));
       if (!agg) {
         agg = {
-          key,
+          key: workKeyFor(item),
           name: item.name,
           pic: item.pic,
           remarks: item.remarks,
           year: item.year,
           typeName: item.typeName,
           score: item.score,
+          scoreSource: item.scoreSource,
           shortDrama: item.shortDrama,
           variants: [],
         };
-        map.set(key, agg);
+        // 同名同年的不同来源ID也不能共用一个React key或详情路由。
+        if (groups.some((g) => g.key === agg!.key)) agg.key = workVariantKey(item);
+        groups.push(agg);
       }
-      // 只保留同一源的第一个副本，避免重复线路
-      if (!agg.variants.some((v) => v.sourceKey === item.sourceKey)) {
+      // 同一条目经渐进搜索重复合并时只更新，不重复加线路。
+      if (!agg.variants.some((v) => v.sourceKey === item.sourceKey && v.vodId === item.vodId)) {
         agg.variants.push(item);
       }
       if (!agg.pic && item.pic) agg.pic = item.pic;
       if (!agg.remarks && item.remarks) agg.remarks = item.remarks;
       if (!agg.year && item.year) agg.year = item.year;
       if (!agg.typeName && item.typeName) agg.typeName = item.typeName;
-      if (item.score > agg.score) agg.score = item.score;
-      // 任一来源标为短剧即算短剧，避免它借正常源的分类蒙混到前面
+      if (item.score > 0 && (
+        (item.scoreSource === 'douban' && (agg.scoreSource !== 'douban' || item.score > agg.score)) ||
+        (item.scoreSource === 'site' && agg.scoreSource !== 'douban' && item.score > agg.score)
+      )) {
+        agg.score = item.score;
+        agg.scoreSource = item.scoreSource;
+      }
       if (item.shortDrama) agg.shortDrama = true;
     }
   }
-
-  const list = [...map.values()];
-
-  // 线路内部按健康度排序 —— 用户默认拿到的是最快最稳的那条
-  for (const agg of list) {
+  // 首条缺年份、后续补上真实年份时，更新路由身份。
+  for (const agg of groups) {
+    const year = agg.variants.map((v) => v.year).find(Boolean);
+    if (year) agg.year = year;
+    if (agg.key === workKeyFor({ name: agg.name, year: '' })) agg.key = workKeyFor(agg);
     agg.variants.sort((a, b) => health.score(b.sourceKey) - health.score(a.sourceKey));
   }
-
-  /*
-   * 结果排序，优先级从高到低：
-   *   1. 内容分层 —— 豆瓣有评分的作品 > 普通影视 > 网络短剧。
-   *      不能用「被多少源收录」打头：短剧是流水线批量生产的，同一部常被十几个源
-   *      同时收录，反而把用户想看的影视作品挤到后面。
-   *   2. 豆瓣评分 —— 同为正规作品时，分数高的更可能是用户想看的。
-   *   3. 收录源数 —— 说明热门与可靠，作为同级内的补充信号。
-   */
-  list.sort(
-    (a, b) =>
-      contentRank(a) - contentRank(b) ||
-      b.score - a.score ||
-      b.variants.length - a.variants.length,
-  );
-  return list;
+  return groups;
 }
 
-/** 对所有启用源并发搜索并聚合 */
+export function sortSearchItems(items: AggregatedItem[], keyword: string): AggregatedItem[] {
+  return [...items].sort(
+    (a, b) =>
+      Number(titleRelevance(a.name, keyword) !== 0) - Number(titleRelevance(b.name, keyword) !== 0) ||
+      contentRank(a) - contentRank(b) ||
+      titleRelevance(a.name, keyword) - titleRelevance(b.name, keyword) ||
+      (b.scoreSource === 'douban' ? b.score : 0) - (a.scoreSource === 'douban' ? a.score : 0) ||
+      b.variants.length - a.variants.length,
+  );
+}
+
+/** 单个源的详情恢复也复用同一聚合规则，保持路由键一致。 */
+function aggregateVod(vod: VodItem, health: HealthStore): AggregatedItem {
+  return mergeItems([{ source: { key: vod.sourceKey, name: vod.sourceName } as SourceConfig, items: [vod], status: { key: vod.sourceKey, name: vod.sourceName, state: 'ok', count: 1, ms: 0 } }], health)[0];
+}
+
 export async function searchAll(keyword: string, opts: SearchOptions): Promise<SearchResult> {
   const started = Date.now();
   const kw = keyword.trim();
-  const active = sortByHealth(
-    opts.sources.filter((s) => s.enabled),
-    opts.health,
-  );
-
-  if (!kw || !active.length) {
-    return { keyword: kw, items: [], statuses: [], totalMs: 0 };
-  }
+  const active = sortByHealth(opts.sources.filter((s) => s.enabled), opts.health);
+  if (!kw || !active.length) return { keyword: kw, items: [], statuses: [], totalMs: 0 };
 
   const statuses: SourceStatus[] = [];
   const outcomes: SourceOutcome[] = [];
   const track = (status: SourceStatus) => {
+    if (opts.signal?.aborted) return;
     const i = statuses.findIndex((s) => s.key === status.key);
     if (i >= 0) statuses[i] = status;
     else statuses.push(status);
-    opts.onStatus?.(status);
+    opts.onStatus?.({ ...status });
   };
-
-  // 并发发起，全部结束后统一 reactive 更新一次
-  const results = await Promise.all(
-    active.map((s) => queryOne(s, kw, { ...opts, onStatus: track })),
+  await Promise.all(
+    active.map(async (source) => {
+      const outcome = await queryOne(source, kw, { ...opts, onStatus: track });
+      if (opts.signal?.aborted || outcome.status.error === 'cancelled') return;
+      outcomes.push(outcome);
+      opts.onPartial?.(sortSearchItems(mergeItems(outcomes, opts.health), kw), statuses.map((s) => ({ ...s })));
+    }),
   );
-  outcomes.push(...results);
-
-  const items = mergeItems(outcomes, opts.health);
   return {
     keyword: kw,
-    items,
-    statuses: [...statuses].filter((s) => s.state !== 'loading'),
+    items: sortSearchItems(mergeItems(outcomes, opts.health), kw),
+    statuses: statuses.filter((s) => s.state !== 'loading').map((s) => ({ ...s })),
     totalMs: Date.now() - started,
   };
 }
 
-/**
- * 按 vodId 从单个源拉取详情条目（收藏 / 历史记录直进详情页用）。
- *
- * 这些入口本地就存着 sourceKey + vodId，为找回一部片向全部源发起
- * 搜索太浪费——单源 ac=videolist&ids= 一次请求秒级返回。
- * 返回 null 表示源不可用或该片已不在源里，调用方应回退到全量搜索。
- */
 export async function fetchById(
   source: SourceConfig,
   vodId: string,
-  opts: { health: HealthStore; timeoutMs?: number },
+  opts: { health: HealthStore; timeoutMs?: number; signal?: AbortSignal },
 ): Promise<AggregatedItem | null> {
   if (!vodId) return null;
   const t0 = Date.now();
   const url = buildApiUrl(source.api, { ac: 'videolist', ids: vodId });
-  const { json } = await httpGetJson<RawVodResponse>(url, opts.timeoutMs ?? 12000);
+  const { json, result } = await httpGetJson<RawVodResponse>(url, opts.timeoutMs ?? 12000, {}, opts.signal);
   if (!json) {
-    opts.health.recordFail(source.key);
+    if (!opts.signal?.aborted && result.error !== 'cancelled') opts.health.recordFail(source.key);
     return null;
   }
   const raw = extractList(json)[0];
   opts.health.recordOk(source.key, Date.now() - t0);
   const vod = raw ? toVodItem(raw, source) : null;
-  if (!vod) return null;
-  return {
-    key: normalizeName(vod.name),
-    name: vod.name,
-    pic: vod.pic,
-    remarks: vod.remarks,
-    year: vod.year,
-    typeName: vod.typeName,
-    score: vod.score,
-    shortDrama: vod.shortDrama,
-    variants: [vod],
-  };
+  return vod ? aggregateVod(vod, opts.health) : null;
 }
 
-/**
- * 快速探测一批源是否可用（设置页「测速」用）。
- * 用较短的超时，避免用户久等。
- */
 export async function probeSources(
   sources: SourceConfig[],
-  opts: { health: HealthStore; timeoutMs?: number; onStatus?: (s: SourceStatus) => void },
+  opts: { health: HealthStore; timeoutMs?: number; onStatus?: (s: SourceStatus) => void; signal?: AbortSignal },
 ): Promise<SourceStatus[]> {
-  const keyword = '测试';
   const out = await Promise.all(
-    sources.map((s) =>
-      queryOne(s, keyword, {
-        sources,
-        health: opts.health,
-        timeoutMs: opts.timeoutMs ?? 8000,
-        onStatus: opts.onStatus,
-      }),
-    ),
+    sources.map((s) => queryOne(s, '测试', {
+      sources, health: opts.health, timeoutMs: opts.timeoutMs ?? 8000,
+      onStatus: opts.onStatus, signal: opts.signal,
+    })),
   );
   return out.map((o) => o.status);
 }

@@ -6,6 +6,7 @@
  */
 import { Preferences } from '@capacitor/preferences';
 import type { FavoriteEntry, HealthRecord, HistoryEntry, SourceConfig } from './types';
+import { upgradeSavedWorkKey } from './work.ts';
 
 export const KEYS = {
   sources: 'cinedesk.sources.v1',
@@ -14,6 +15,7 @@ export const KEYS = {
   favorites: 'cinedesk.favorites.v1',
   settings: 'cinedesk.settings.v1',
   recent: 'cinedesk.recent.v1',
+  search: 'cinedesk.search.v1',
 } as const;
 
 export interface Settings {
@@ -57,8 +59,13 @@ export const loadHealth = (): Promise<Record<string, HealthRecord>> =>
 export const loadHistory = (): Promise<HistoryEntry[]> =>
   loadJSON<HistoryEntry[]>(KEYS.history, []);
 
-export const loadFavorites = (): Promise<FavoriteEntry[]> =>
-  loadJSON<FavoriteEntry[]>(KEYS.favorites, []);
+export const loadFavorites = async (): Promise<FavoriteEntry[]> => {
+  const list = await loadJSON<FavoriteEntry[]>(KEYS.favorites, []);
+  if (!Array.isArray(list)) return [];
+  const next = list.filter((entry) => entry && typeof entry.name === 'string').map(upgradeSavedWorkKey);
+  if (next.some((entry, i) => entry !== list[i])) void saveJSON(KEYS.favorites, next);
+  return next;
+};
 
 /** 搜索历史（关键词），最多保留 8 条 */
 export const loadRecent = (): Promise<string[]> => loadJSON<string[]>(KEYS.recent, []);
@@ -74,11 +81,11 @@ export const loadSettings = (): Promise<Settings> =>
 const HISTORY_MAX = 300;
 
 export function pushHistory(list: HistoryEntry[], entry: HistoryEntry): HistoryEntry[] {
-  const next = [entry, ...list.filter((h) => h.key !== entry.key)];
+  const next = [entry, ...list.filter((h) => h.key !== entry.key || h.sourceKey !== entry.sourceKey || h.vodId !== entry.vodId)];
   return next.slice(0, HISTORY_MAX);
 }
 
 export function toggleFavorite(list: FavoriteEntry[], entry: FavoriteEntry): FavoriteEntry[] {
-  const exists = list.some((f) => f.key === entry.key);
-  return exists ? list.filter((f) => f.key !== entry.key) : [entry, ...list];
+  const exists = list.some((f) => f.key === entry.key && f.sourceKey === entry.sourceKey && f.vodId === entry.vodId);
+  return exists ? list.filter((f) => f.key !== entry.key || f.sourceKey !== entry.sourceKey || f.vodId !== entry.vodId) : [entry, ...list];
 }

@@ -17,6 +17,7 @@ import { extractList, toVodItem } from './cms';
 import { classifyContent, normalizeName } from './filter';
 import { buildApiUrl, httpGetJson } from './http';
 import type { AggregatedItem, RawVodResponse, SourceConfig, VodItem } from './types';
+import { workKeyFor } from './work';
 
 /** 最多同时查两个分类，避免为一个推荐位打四五个请求 */
 const MAX_TYPES = 2;
@@ -44,13 +45,15 @@ const categoryCache = new Map<string, CategoryCache>();
 const resultCache = new Map<string, { at: number; items: AggregatedItem[] }>();
 
 /** 取某个源的分类表（带缓存） */
-async function loadCategories(source: SourceConfig, timeoutMs: number): Promise<Category[]> {
+async function loadCategories(source: SourceConfig, timeoutMs: number, signal?: AbortSignal): Promise<Category[]> {
   const hit = categoryCache.get(source.key);
   if (hit && Date.now() - hit.at < CACHE_TTL) return hit.list;
 
   const { json } = await httpGetJson<RawVodResponse & { class?: Category[] }>(
     buildApiUrl(source.api, { ac: 'list' }),
     timeoutMs,
+    {},
+    signal,
   );
   const raw = (json as { class?: unknown } | null)?.class;
   if (!Array.isArray(raw)) return [];
@@ -159,7 +162,7 @@ export interface RecommendOptions {
   /** 用哪个源查候选。分类 id 是源私有的，必须用影片自身所在的源 */
   source: SourceConfig;
   timeoutMs?: number;
-  signal?: { aborted: boolean };
+  signal?: AbortSignal;
 }
 
 /**
@@ -175,7 +178,7 @@ export async function recommendFor(
   const hit = resultCache.get(cacheKey);
   if (hit && Date.now() - hit.at < CACHE_TTL) return hit.items;
 
-  const cats = await loadCategories(source, timeoutMs);
+  const cats = await loadCategories(source, timeoutMs, opts.signal);
   if (opts.signal?.aborted) return [];
 
   /*
@@ -200,6 +203,8 @@ export async function recommendFor(
         httpGetJson<RawVodResponse>(
           buildApiUrl(source.api, { ac: 'detail', t: t.type_id, pg: String(pg) }),
           timeoutMs,
+          {},
+          opts.signal,
         ).then(({ json }) =>
           extractList(json)
             .map((raw) => toVodItem(raw, source))
@@ -257,13 +262,14 @@ export async function recommendFor(
  */
 function toAggregated(v: VodItem): AggregatedItem {
   return {
-    key: normalizeName(v.name),
+    key: workKeyFor(v),
     name: v.name,
     pic: v.pic,
     remarks: v.remarks,
     year: v.year,
     typeName: v.typeName,
     score: v.score,
+    scoreSource: v.scoreSource,
     shortDrama: v.shortDrama,
     variants: [v],
   };

@@ -858,6 +858,12 @@ img {
   flex: 0 0 auto;
 }
 
+.player-retry {
+  flex: 0 0 120px;
+  min-height: 44px;
+  pointer-events: auto;
+}
+
 .player-stage video {
   width: 100%;
   height: 100%;
@@ -1043,16 +1049,27 @@ img {
  */
 .switch {
   width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  background: transparent;
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.switch::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 9px;
+  width: 44px;
   height: 26px;
   border-radius: 13px;
   background: var(--bg-raise);
   box-shadow: inset 0 0 0 1px var(--line);
-  position: relative;
   transition: background 0.2s var(--ease), box-shadow 0.2s var(--ease);
-  flex: 0 0 auto;
 }
 
-.switch.on {
+.switch.on::before {
   background: var(--accent);
   box-shadow: none;
 }
@@ -1060,7 +1077,7 @@ img {
 .switch::after {
   content: '';
   position: absolute;
-  top: 3px;
+  top: 12px;
   left: 3px;
   width: 20px;
   height: 20px;
@@ -1168,10 +1185,25 @@ img {
   border-radius: 999px;
   padding: 9px 17px;
   font-size: 13px;
-  max-width: 84vw;
+  max-width: calc(100vw - 24px);
   text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
   animation: toast-in 0.22s var(--ease);
   box-shadow: var(--shadow-lg);
+}
+
+.toast-action {
+  min-width: 52px;
+  min-height: 44px;
+  margin: -9px -13px -9px 0;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 @keyframes toast-in {

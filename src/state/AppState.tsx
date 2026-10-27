@@ -15,7 +15,6 @@ import {
   type ReactNode,
 } from 'react';
 import {
-  type AggregatedItem,
   DEFAULT_SETTINGS,
   HealthStore,
   KEYS,
@@ -23,9 +22,11 @@ import {
   loadFavorites,
   loadHealth,
   loadHistory,
+  loadJSON,
   loadSettings,
   loadSources,
   pushHistory,
+  putItems,
   reconcileSources,
   saveJSON,
   toggleFavorite,
@@ -34,16 +35,12 @@ import {
   type HistoryEntry,
   type Settings,
   type SourceConfig,
-  type SourceStatus,
 } from '../core';
 
-/** 一次搜索的完整快照：从详情页返回首页时用它恢复搜索结果 */
-export interface SearchSnapshot {
-  keyword: string;
-  items: AggregatedItem[];
-  statuses: SourceStatus[];
-  totalMs: number;
-}
+import { normalizeSearchSnapshot, SEARCH_ITEM_MAX, type SearchSnapshot } from '../core/searchSnapshot';
+export { normalizeSearchSnapshot, type SearchSnapshot } from '../core/searchSnapshot';
+
+/** 从详情页返回或进程重建后恢复最近一次有效搜索。 */
 
 interface AppState {
   ready: boolean;
@@ -62,10 +59,13 @@ interface AppState {
   resetSources: () => void;
   setSettings: (patch: Partial<Settings>) => void;
   rememberPlay: (entry: HistoryEntry) => void;
-  removeHistory: (key: string) => void;
+  removeHistory: (entry: Pick<HistoryEntry, 'key' | 'sourceKey' | 'vodId'>) => void;
   clearHistory: () => void;
+  restoreHistory: (entries: HistoryEntry[]) => void;
+  restoreFavorites: (entries: FavoriteEntry[]) => void;
+  restoreSource: (source: SourceConfig) => void;
   toggleFav: (entry: FavoriteEntry) => void;
-  isFavorite: (key: string) => boolean;
+  isFavorite: (entry: Pick<FavoriteEntry, 'key' | 'sourceKey' | 'vodId'>) => boolean;
   persistHealth: () => void;
   resetHealth: () => void;
 }
@@ -85,12 +85,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [srcs, health, hist, favs, cfg] = await Promise.all([
+      const [srcs, health, hist, favs, cfg, storedSearch] = await Promise.all([
         loadSources(defaultSources()),
         loadHealth(),
         loadHistory(),
         loadFavorites(),
         loadSettings(),
+        loadJSON<unknown>(KEYS.search, null),
       ]);
       if (!alive) return;
       healthRef.current = new HealthStore(health as Record<string, HealthRecord>);
@@ -105,6 +106,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setHistory(hist);
       setFavorites(favs);
       setSettingsState({ ...DEFAULT_SETTINGS, ...cfg });
+      const snapshot = normalizeSearchSnapshot(storedSearch);
+      if (snapshot) putItems(snapshot.items);
+      setSearchState(snapshot);
+      if (!snapshot && storedSearch) void saveJSON(KEYS.search, null);
       setReady(true);
     })();
     return () => {
@@ -166,6 +171,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
    */
   const setSearch = useCallback((s: SearchSnapshot | null) => {
     setSearchState(s);
+    void saveJSON(KEYS.search, s ? { ...s, savedAt: s.savedAt ?? Date.now(), items: s.items.slice(0, SEARCH_ITEM_MAX) } : null);
   }, []);
 
   const setSettings = useCallback((patch: Partial<Settings>) => {
@@ -187,9 +193,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const removeHistory = useCallback((key: string) => {
+  const removeHistory = useCallback((entry: Pick<HistoryEntry, 'key' | 'sourceKey' | 'vodId'>) => {
     setHistory((prev) => {
-      const next = prev.filter((h) => h.key !== key);
+      const next = prev.filter((h) => h.key !== entry.key || h.sourceKey !== entry.sourceKey || h.vodId !== entry.vodId);
       void saveJSON(KEYS.history, next);
       return next;
     });
@@ -200,6 +206,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void saveJSON(KEYS.history, []);
   }, []);
 
+  const restoreHistory = useCallback((entries: HistoryEntry[]) => {
+    setHistory((prev) => {
+      const next = [...prev, ...entries.filter((entry) => !prev.some((h) => h.key === entry.key && h.sourceKey === entry.sourceKey && h.vodId === entry.vodId))].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 300);
+      void saveJSON(KEYS.history, next);
+      return next;
+    });
+  }, []);
+
+  const restoreFavorites = useCallback((entries: FavoriteEntry[]) => {
+    setFavorites((prev) => {
+      const next = [...entries.filter((entry) => !prev.some((f) => f.key === entry.key && f.sourceKey === entry.sourceKey && f.vodId === entry.vodId)), ...prev].slice(0, 300);
+      void saveJSON(KEYS.favorites, next);
+      return next;
+    });
+  }, []);
+
+  const restoreSource = useCallback((source: SourceConfig) => {
+    setSourcesState((prev) => {
+      if (prev.some((s) => s.key === source.key)) return prev;
+      const next = [...prev, source];
+      void saveJSON(KEYS.sources, next);
+      return next;
+    });
+  }, []);
+
   const toggleFav = useCallback((entry: FavoriteEntry) => {
     setFavorites((prev) => {
       const next = toggleFavorite(prev, entry);
@@ -208,7 +239,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const isFavorite = useCallback((key: string) => favorites.some((f) => f.key === key), [favorites]);
+  const isFavorite = useCallback((entry: Pick<FavoriteEntry, 'key' | 'sourceKey' | 'vodId'>) => favorites.some((f) => f.key === entry.key && f.sourceKey === entry.sourceKey && f.vodId === entry.vodId), [favorites]);
 
   const resetHealth = useCallback(() => {
     healthRef.current.reset();
@@ -234,6 +265,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       rememberPlay,
       removeHistory,
       clearHistory,
+      restoreHistory,
+      restoreFavorites,
+      restoreSource,
       toggleFav,
       isFavorite,
       persistHealth,
@@ -242,7 +276,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [
       ready, sources, history, favorites, settings, search, setSearch, setSources, addSource,
       updateSource, removeSource, resetSources, setSettings, rememberPlay, removeHistory,
-      clearHistory, toggleFav, isFavorite, persistHealth, resetHealth,
+      clearHistory, restoreHistory, restoreFavorites, restoreSource, toggleFav, isFavorite, persistHealth, resetHealth,
     ],
   );
 

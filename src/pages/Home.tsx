@@ -53,6 +53,18 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   // 每次搜索递增，防止旧搜索的结果覆盖新搜索
   const seqRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const scrollRef = useRef(search?.scrollY ?? 0);
+  const itemsRef = useRef(items);
+  const statusesRef = useRef(statuses);
+  itemsRef.current = items;
+  statusesRef.current = statuses;
+  useEffect(() => {
+    const savePosition = () => { scrollRef.current = window.scrollY; };
+    window.addEventListener('scroll', savePosition, { passive: true });
+    return () => window.removeEventListener('scroll', savePosition);
+  }, []);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   /*
    * 热搜榜：先用缓存立刻渲染，再后台刷新。
@@ -83,8 +95,19 @@ export default function Home() {
         toast('请输入片名');
         return;
       }
+      if (ready && !activeCount) {
+        setKeyword(kw);
+        setSearched(true);
+        setSearching(false);
+        setItems([]);
+        setStatuses([]);
+        return;
+      }
       inputRef.current?.blur();
       const seq = ++seqRef.current;
+      abortRef.current?.abort();
+      const ctl = new AbortController();
+      abortRef.current = ctl;
 
       setSearching(true);
       setSearched(true);
@@ -103,6 +126,13 @@ export default function Home() {
         sources,
         health,
         timeoutMs: settings.timeoutMs,
+        signal: ctl.signal,
+        onPartial: (partialItems, partialStatuses) => {
+          if (seq !== seqRef.current || ctl.signal.aborted) return;
+          setItems(partialItems);
+          setStatuses(partialStatuses);
+          putItems(partialItems);
+        },
         onStatus: (st) => {
           if (seq !== seqRef.current) return;
           setStatuses((prev) => {
@@ -134,10 +164,30 @@ export default function Home() {
         toast(`${activeCount} 个源都没搜到「${kw}」`);
       }
     },
-    [sources, health, settings.timeoutMs, persistHealth, toast, activeCount, setSearch],
+    [sources, health, settings.timeoutMs, persistHealth, toast, activeCount, ready, setSearch],
   );
 
+  useEffect(() => {
+    if (!ready || !search) return;
+    setKeyword(search.keyword);
+    setItems(search.items);
+    setStatuses(search.statuses);
+    setTotalMs(search.totalMs);
+    setSearched(true);
+    const frame = requestAnimationFrame(() => window.scrollTo({ top: search.scrollY ?? 0, behavior: 'instant' }));
+    return () => cancelAnimationFrame(frame);
+  }, [ready]);
+
+  useEffect(() => {
+    const query = new URLSearchParams(location.search).get('q');
+    if (ready && query) {
+      setKeyword(query);
+      void runSearch(query);
+    }
+  }, [ready]);
+
   const openDetail = (item: AggregatedItem) => {
+    setSearch({ keyword, items: itemsRef.current, statuses: statusesRef.current, totalMs, scrollY: scrollRef.current, savedAt: search?.savedAt });
     nav(`/detail/${encodeURIComponent(item.key)}?name=${encodeURIComponent(item.name)}`, {
       state: { item },
     });
@@ -201,7 +251,9 @@ export default function Home() {
             className="btn-search"
             type="button"
             onClick={() => {
-              seqRef.current += 1; // 使在途搜索失效：结果返回时会被 seq 检查丢弃
+              seqRef.current += 1;
+              abortRef.current?.abort();
+              abortRef.current = null;
               setSearching(false);
               setSearched(false); // 回到初始态：热搜榜回来，进度框与「没有找到」不出现
               setStatuses([]);
@@ -309,7 +361,16 @@ export default function Home() {
         </>
       )}
 
-      {searched && !searching && items.length === 0 && (
+      {searched && !searching && activeCount === 0 && (
+        <div className="empty">
+          <div className="empty-icon">⚙️</div>
+          <div>尚未启用资源源</div>
+          <div className="hint">启用至少一个资源源后才能搜索影片。</div>
+          <button className="btn primary" style={{ maxWidth: 220 }} onClick={() => nav('/settings')}>前往设置启用资源源</button>
+        </div>
+      )}
+
+      {searched && !searching && activeCount > 0 && items.length === 0 && (
         <div className="empty">
           <div className="empty-icon">🔍</div>
           <div>没有找到「{keyword}」</div>

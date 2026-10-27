@@ -8,7 +8,7 @@
  * 评分同时考虑成功率与响应速度，失败会带来惩罚而非直接拉黑，
  * 这样恢复的源能在几轮之后重新被优先使用。
  */
-import type { HealthRecord } from './types';
+import type { HealthRecord } from './types.ts';
 
 const EMPTY: HealthRecord = {
   lastOk: 0,

@@ -36,7 +36,11 @@ export default function VodCard({ item, onClick, showSources = true }: Props) {
           </div>
         )}
         {remarks && <span className="badge-remarks">{remarks}</span>}
-        {item.score > 0 && <span className="badge-score">{item.score.toFixed(1)}</span>}
+        {item.score > 0 && (
+          <span className="badge-score" title={item.scoreSource === 'site' ? '站内评分' : '豆瓣评分'}>
+            {item.scoreSource === 'site' ? '站内' : '豆瓣'} {item.score.toFixed(1)}
+          </span>
+        )}
       </div>
       <div className="vod-meta">
         <div className="vod-name" title={item.name}>

@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../state/AppState';
+import { useToast } from '../components/Toast';
 
 export default function Favorites() {
   const nav = useNavigate();
-  const { favorites, history, toggleFav, removeHistory, clearHistory } = useApp();
+  const { favorites, history, toggleFav, removeHistory, clearHistory, restoreHistory, restoreFavorites } = useApp();
+  const toast = useToast();
   const [tab, setTab] = useState<'fav' | 'history'>('fav');
 
   const toDetail = (key: string, name: string, meta?: { sourceKey: string; vodId: string }) => {
@@ -42,7 +44,7 @@ export default function Favorites() {
           ) : (
             <div className="list">
               {favorites.map((f) => (
-                <div className="list-row" key={f.key}>
+                <div className="list-row" key={`${f.key}:${f.sourceKey}:${f.vodId}`}>
                   {f.pic ? (
                     <img
                       className="list-thumb"
@@ -67,7 +69,10 @@ export default function Favorites() {
                       {[f.year, f.remarks].filter(Boolean).join(' · ') || f.sourceName}
                     </div>
                   </button>
-                  <button className="row-action" onClick={() => toggleFav(f)}>
+                  <button className="row-action" onClick={() => {
+                    toggleFav(f);
+                    toast(`已移除「${f.name}」`, { label: '撤销', onClick: () => restoreFavorites([f]) });
+                  }}>
                     移除
                   </button>
                 </div>
@@ -89,7 +94,11 @@ export default function Favorites() {
             <>
               <div className="section-head">
                 <span className="section-title">最近观看</span>
-                <button className="section-more" onClick={clearHistory}>
+                <button className="section-more" onClick={() => {
+                  const removed = [...history];
+                  clearHistory();
+                  toast('观看记录已清空', { label: '撤销', onClick: () => restoreHistory(removed) });
+                }}>
                   清空
                 </button>
               </div>
@@ -98,7 +107,7 @@ export default function Favorites() {
                   const pct =
                     h.duration > 0 ? Math.min(100, Math.round((h.position / h.duration) * 100)) : 0;
                   return (
-                    <div className="list-row" key={h.key}>
+                    <div className="list-row" key={`${h.key}:${h.sourceKey}:${h.vodId}`}>
                       {h.pic ? (
                         <img
                           className="list-thumb"
@@ -129,7 +138,10 @@ export default function Favorites() {
                           </div>
                         )}
                       </button>
-                      <button className="row-action" onClick={() => removeHistory(h.key)}>
+                      <button className="row-action" onClick={() => {
+                        removeHistory(h);
+                        toast(`已删除「${h.name}」的观看记录`, { label: '撤销', onClick: () => restoreHistory([h]) });
+                      }}>
                         删除
                       </button>
                     </div>

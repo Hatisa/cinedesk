@@ -10,8 +10,8 @@
  * 例： vod_play_from = "jsyun$$$jsm3u8"
  *      vod_play_url  = "第01集$https://a/play/xxx#第02集$...$$$第01集$https://b/x.m3u8#..."
  */
-import { classifyContent } from './filter';
-import type { Episode, PlayLine, RawVod, RawVodResponse, SourceConfig, VodItem } from './types';
+import { classifyContent } from './filter.ts';
+import type { Episode, PlayLine, RawVod, RawVodResponse, SourceConfig, VodItem } from './types.ts';
 
 const SEP_LINE = '$$$';
 const SEP_EPISODE = '#';
@@ -77,24 +77,16 @@ export function isDirectUrl(url: string): boolean {
  * 返回 null 表示这条不该出现在结果里（无片名、命中内容过滤、无可用线路）。
  */
 export function toVodItem(raw: RawVod, source: SourceConfig): VodItem | null {
-  const name = (raw.vod_name || '').trim();
+  const name = cleanName(raw.vod_name);
   if (!name) return null;
 
-  const scoreRaw = raw.vod_douban_score;
-  let score = typeof scoreRaw === 'number' ? scoreRaw : parseFloat(String(scoreRaw ?? ''));
-  if (!Number.isFinite(score) || score <= 0) {
-    /*
-     * 豆瓣分缺失时的回退。不少采集站只返回站内分 vod_score，而站内分
-     * 普遍注水（几乎全是 8.5+）：直接采用会让这些条目在分层排序里冒充
-     * 豆瓣高分作品；完全不采用则让「唯一收录该片的源恰好不返回豆瓣分」
-     * 的影片永远沉在无分层。折中——回退站内分并打 0.9 折：保留「正规
-     * 作品」的分层信号，又让注水分在与真豆瓣分同台排序时天然靠后。
-     */
-    const siteRaw = raw.vod_score;
-    const site = typeof siteRaw === 'number' ? siteRaw : parseFloat(String(siteRaw ?? ''));
-    if (Number.isFinite(site) && site > 0) score = Math.round(site * 9) / 10;
-  }
-  const safeScore = Number.isFinite(score) ? score : 0;
+  const parseScore = (value: string | number | undefined) => {
+    const parsed = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  };
+  const doubanScore = parseScore(raw.vod_douban_score);
+  const siteScore = parseScore(raw.vod_score);
+  const safeScore = doubanScore || siteScore;
 
   /*
    * 内容甄别在建线路之前做，成人条目连解析播放地址的开销都省掉。
@@ -102,7 +94,7 @@ export function toVodItem(raw: RawVod, source: SourceConfig): VodItem | null {
    * 这样的多值串（可能藏着短剧标记），后者是主分类。
    */
   const classText = [raw.vod_class, raw.type_name].filter(Boolean).join(' ');
-  const verdict = classifyContent({ name, classText, score: safeScore });
+  const verdict = classifyContent({ name, classText, score: doubanScore });
   if (verdict.adult) return null;
 
   const lines = parsePlayLines(raw);
@@ -121,12 +113,22 @@ export function toVodItem(raw: RawVod, source: SourceConfig): VodItem | null {
     area: (raw.vod_area || '').trim(),
     typeName: (raw.vod_class || raw.type_name || '').trim(),
     score: safeScore,
-    actor: (raw.vod_actor || '').trim(),
-    director: (raw.vod_director || '').trim(),
+    scoreSource: safeScore ? (doubanScore ? 'douban' : 'site') : null,
+    actor: cleanPeople(raw.vod_actor),
+    director: cleanPeople(raw.vod_director),
     content: stripHtml(raw.vod_content || ''),
     lines,
     shortDrama: verdict.shortDrama,
   };
+}
+
+/** 资源站原始文本可能带分隔符或尾逗号，只清理边缘，不吞掉正文。 */
+export function cleanName(value: string | undefined): string {
+  return (value || '').trim().replace(/\s*\$\s*/g, ' / ');
+}
+
+export function cleanPeople(value: string | undefined): string {
+  return (value || '').trim().replace(/^[，,\s]+|[，,\s]+$/g, '');
 }
 
 /** 简介常带 <p> 等标签，清理后展示 */

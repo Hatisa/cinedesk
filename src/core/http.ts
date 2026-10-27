@@ -38,6 +38,7 @@ export async function httpGetText(
   url: string,
   timeoutMs = 12000,
   extraHeaders: Record<string, string> = {},
+  signal?: AbortSignal,
 ): Promise<HttpResult> {
   const headers: Record<string, string> = {
     'User-Agent': UA,
@@ -82,21 +83,25 @@ export async function httpGetText(
 
   try {
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), timeoutMs);
+    const onCancel = () => ctl.abort('cancelled');
+    signal?.addEventListener('abort', onCancel, { once: true });
+    if (signal?.aborted) ctl.abort('cancelled');
+    const timer = setTimeout(() => ctl.abort('timeout'), timeoutMs);
     const res = await fetch(target, { headers, signal: ctl.signal });
     clearTimeout(timer);
+    signal?.removeEventListener('abort', onCancel);
     const text = await res.text();
     return { ok: res.ok, status: res.status, text, ms: Date.now() - t0 };
   } catch (e) {
-    return { ok: false, status: 0, text: '', ms: Date.now() - t0, error: errText(e) };
+    return { ok: false, status: 0, text: '', ms: Date.now() - t0, error: errText(e, signal?.aborted ? 'cancelled' : 'timeout') };
   }
 }
 
-function errText(e: unknown): string {
+function errText(e: unknown, reason?: unknown): string {
   if (e instanceof Error) {
     const cause = (e as { cause?: { code?: string } }).cause;
     if (cause?.code) return cause.code;
-    return e.name === 'AbortError' ? 'timeout' : e.message;
+    if (e.name === 'AbortError') return reason === 'cancelled' ? 'cancelled' : 'timeout';
   }
   return String(e);
 }
@@ -106,8 +111,9 @@ export async function httpGetJson<T = unknown>(
   url: string,
   timeoutMs = 12000,
   extraHeaders: Record<string, string> = {},
+  signal?: AbortSignal,
 ): Promise<{ json: T | null; result: HttpResult }> {
-  const result = await httpGetText(url, timeoutMs, extraHeaders);
+  const result = await httpGetText(url, timeoutMs, extraHeaders, signal);
   if (!result.ok || !result.text) return { json: null, result };
   try {
     return { json: JSON.parse(result.text) as T, result };

@@ -211,10 +211,9 @@ test('短剧条目标记为短剧', () => {
  * 四、内容分层与排序权重
  * ------------------------------------------------------------------ */
 
-test('分层：豆瓣评分优先于一切', () => {
+test('分层：豆瓣评分提升普通作品，但短剧始终沉底', () => {
   assert.equal(classifyContent({ name: '庆余年 第一季', classText: '内地剧', score: 7.9 }).tier, 'mainstream');
-  // 带评分的短剧分类也归 mainstream —— 用户显然更想看它
-  assert.equal(classifyContent({ name: '某片', classText: '短剧', score: 7.5 }).tier, 'mainstream');
+  assert.equal(classifyContent({ name: '某片', classText: '短剧', score: 7.5 }).tier, 'shortDrama');
 });
 
 test('分层：普通影视 > 短剧', () => {
@@ -228,6 +227,12 @@ test('排序权重：主流作品在短剧之前', () => {
   const short = contentRank({ score: 0, shortDrama: true });
   assert.ok(mainstream < general, '有评分应排在普通作品前');
   assert.ok(general < short, '普通作品应排在短剧前');
+});
+
+test('排序权重：带分短剧与站内高分都不会越过普通作品', () => {
+  assert.equal(contentRank({ score: 9, shortDrama: true }), 2);
+  assert.equal(contentRank({ score: 10, scoreSource: 'site', shortDrama: false }), 1);
+  assert.equal(contentRank({ score: 8, scoreSource: 'douban', shortDrama: false }), 0);
 });
 
 test('排序权重：评分与收录源数无关，短剧即使被多源收录也沉底', () => {

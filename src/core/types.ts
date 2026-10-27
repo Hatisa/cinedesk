@@ -87,8 +87,9 @@ export interface VodItem {
   year: string;
   area: string;
   typeName: string;
-  /** 豆瓣评分，0 表示无 */
+  /** 展示评分，0 表示无；口径由 scoreSource 标明 */
   score: number;
+  scoreSource: 'douban' | 'site' | null;
   actor: string;
   director: string;
   content: string;
@@ -107,6 +108,7 @@ export interface AggregatedItem {
   year: string;
   typeName: string;
   score: number;
+  scoreSource: 'douban' | 'site' | null;
   /**
    * 是否短剧。只要**任一**来源把它归入短剧分类即为真——
    * 实测同一部「庆余年之风起沧州」在 ffzy 标为「短剧」、在 jszy 标为「古装仙侠」，

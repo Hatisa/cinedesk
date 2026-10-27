@@ -1,173 +1,170 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import Player from '../components/Player';
 import { useToast } from '../components/Toast';
-import { getItem, putItems, searchAll, type AggregatedItem } from '../core';
+import {
+  failureKey,
+  fetchById,
+  getItem,
+  matchesSavedWork,
+  moveSelection,
+  nextPlayable,
+  nonNegativeInt,
+  playPath,
+  putItems,
+  searchAll,
+  selectionFor,
+  type AggregatedItem,
+  type PlaySelection,
+} from '../core';
 import { useApp } from '../state/AppState';
 
 export default function Play() {
   const { key = '' } = useParams();
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const nav = useNavigate();
   const loc = useLocation();
   const toast = useToast();
-  const { sources, health, settings, history, rememberPlay, persistHealth } = useApp();
-
+  const { ready, sources, health, settings, history, rememberPlay, persistHealth } = useApp();
   const passed = (loc.state as { item?: AggregatedItem } | null)?.item;
   const [item, setItem] = useState<AggregatedItem | null>(passed ?? getItem(key));
-  const [lineIdx, setLineIdx] = useState(Math.max(0, Number(sp.get('line') ?? 0)));
-  const [epIdx, setEpIdx] = useState(Math.max(0, Number(sp.get('ep') ?? 0)));
-  /** 已自动尝试失败的来源，避免死循环 */
-  const [failedSources, setFailedSources] = useState<string[]>([]);
-  /** 是否展开来源线路列表（低频操作，默认收起，把空间让给选集） */
   const [showLines, setShowLines] = useState(false);
-  /** 按片名重新搜索后确实没有这个条目，用来区分「还在搜」与「搜不到」 */
   const [notFound, setNotFound] = useState(false);
+  const [failed, setFailed] = useState<Set<string>>(new Set());
+  const [retryKey, setRetryKey] = useState(0);
+  const [resumeAt, setResumeAt] = useState<number | undefined>((loc.state as { resumeAt?: number } | null)?.resumeAt);
+  const [selection, setSelection] = useState<PlaySelection>(() => item ? selectionFor(item, routeFrom(sp)) : { variantIdx: 0, lineIdx: 0, epIdx: nonNegativeInt(sp.get('ep')) });
+  const failedRef = useRef(failed);
+  const selectionRef = useRef(selection);
+  failedRef.current = failed;
+  selectionRef.current = selection;
+  const name = sp.get('name') || item?.name || key.split('~')[0];
 
-  const name = sp.get('name') || item?.name || '';
-
-  // 缓存失效时（进程被回收后恢复、或直接打开链接）用片名重新拉取
+  // 冷启动：先按 source+vod 回源，再按片名搜索；没有条目时也提供返回出口。
   useEffect(() => {
-    if (item || !name) return;
+    if (item || !ready) return;
     let alive = true;
-    (async () => {
-      const res = await searchAll(name, { sources, health, timeoutMs: settings.timeoutMs });
+    const ctl = new AbortController();
+    const meta = (loc.state as { meta?: { sourceKey: string; vodId: string } } | null)?.meta;
+    const sourceKey = meta?.sourceKey || sp.get('source') || '';
+    const vodId = meta?.vodId || sp.get('vod') || '';
+    const source = sources.find((s) => s.key === sourceKey);
+    void (async () => {
+      if (source && vodId) {
+        const restored = await fetchById(source, vodId, { health, timeoutMs: settings.timeoutMs, signal: ctl.signal });
+        if (!alive) return;
+        if (restored && restored.key === key) {
+          putItems([restored]);
+          setItem(restored);
+          return;
+        }
+      }
+      if (!name) {
+        if (alive) setNotFound(true);
+        return;
+      }
+      const res = await searchAll(name, { sources, health, timeoutMs: settings.timeoutMs, signal: ctl.signal });
+      if (!alive) return;
       putItems(res.items);
       persistHealth();
-      if (!alive) return;
-      /*
-       * 只接受精确匹配，绝不能回退到 res.items[0]。
-       * key 由片名归一化而来，匹配不到就说明这个片名在当前源里已经没有了；
-       * 此时随便挑第一条会播出一部毫不相干的影片。
-       */
-      const hit = res.items.find((i) => i.key === key) ?? null;
-      setItem(hit);
-      // 搜索已经结束且确实没有这个条目：要显示「未找到」，而不是一直转圈
+      const hit = res.items.find((i) => i.key === key || (vodId && matchesSavedWork(i, { key, name, year: sp.get('year') || '', sourceKey, vodId })));
+      setItem(hit ?? null);
       setNotFound(!hit);
-    })();
+    })().catch(() => {
+      if (alive) setNotFound(true);
+    });
     return () => {
       alive = false;
+      ctl.abort();
     };
-  }, [item, name, key, sources, health, settings.timeoutMs, persistHealth]);
+  }, [item, ready, name, key, sources, health, settings.timeoutMs, persistHealth, loc.state, sp]);
 
-  const current = useMemo(() => item?.variants[lineIdx] ?? null, [item, lineIdx]);
-  const line = current?.lines[0] ?? null;
+  // 路由（含浏览器前进/后退）是当前播放状态的单一事实来源。
+  useEffect(() => {
+    if (!item) return;
+    const next = selectionFor(item, routeFrom(sp));
+    if (!sameSelection(next, selectionRef.current)) setSelection(next);
+  }, [item, sp]);
+
+  const current = item?.variants[selection.variantIdx] ?? null;
+  const line = current?.lines[selection.lineIdx] ?? null;
   const epTotal = line?.episodes.length ?? 0;
-  /*
-   * 统一用夹紧后的集号，而不是直接用 epIdx。
-   * 换源后各站的集数可能不同（46 集 / 40 集），若不夹紧就会出现
-   * 「高亮停在第 44 集、实际加载第 40 集」这种错位。全流程只认 epIndex。
-   */
-  const epIndex = Math.min(epIdx, Math.max(0, epTotal - 1));
-  const episode = line?.episodes[epIndex] ?? null;
+  const episode = line?.episodes[selection.epIdx] ?? null;
+  const hist = item && current ? history.find((h) =>
+    h.sourceKey === current.sourceKey && h.vodId === current.vodId && matchesSavedWork(item, h),
+  ) : undefined;
 
-  // 续播：仅当历史记录的集数与当前集一致时才跳转
-  const hist = item ? history.find((h) => h.key === item.key) : undefined;
-  const startAt = hist && hist.episodeIndex === epIndex ? hist.position : 0;
-
-  /*
-   * 切集后把当前集滚入视野。
-   *
-   * 长剧集动辄上百集，网格要滚好几屏。若不自动定位，用户切到第 60 集后
-   * 下次进来还得自己找「播到哪一集了」。block:'nearest' 保证只滚动最近的
-   * 滚动容器（即下方的播放信息区），不会把整个播放器顶出屏幕。
-   */
+  const startAt = resumeAt !== undefined ? resumeAt : hist && hist.episodeIndex === selection.epIdx ? hist.position : 0;
   const activeEpRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     activeEpRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [epIndex, lineIdx]);
+  }, [selection.epIdx, selection.variantIdx, selection.lineIdx]);
+
+  const changeSelection = (next: PlaySelection, replace = true) => {
+    if (!item || sameSelection(next, selectionRef.current)) return;
+    const clamped = moveSelection(item, selectionRef.current, next);
+    const path = playPath(item, clamped);
+    // replace 保持播放器返回按钮可回到详情；浏览器前进/后退仍由真实路由同步。
+    if (replace) setSp(new URLSearchParams(path.split('?')[1]), { replace: true });
+    else nav(path, { state: { item } });
+    setSelection(clamped);
+    setResumeAt(undefined);
+  };
 
   const onProgress = (position: number, duration: number) => {
     if (!item || !settings.recordHistory || !current || !episode) return;
     rememberPlay({
-      key: item.key,
-      name: item.name,
-      pic: item.pic,
-      sourceKey: current.sourceKey,
-      sourceName: current.sourceName,
-      vodId: current.vodId,
-      episodeIndex: epIndex,
-      episodeName: episode.name,
-      position,
-      duration,
-      updatedAt: Date.now(),
+      key: item.key, name: item.name, pic: item.pic,
+      sourceKey: current.sourceKey, sourceName: current.sourceName, vodId: current.vodId,
+      episodeIndex: selection.epIdx, episodeName: episode.name, position, duration, updatedAt: Date.now(),
     });
   };
 
-  /**
-   * 线路不可用时自动换源——这是多源聚合最直接的用户价值：
-   * 单条线路挂掉不需要用户自己处理，后台已经换到下一条可用线路。
-   */
   const onError = () => {
     if (!item) return;
-    const failed = current ? [...failedSources, current.sourceKey] : failedSources;
-    setFailedSources(failed);
-    const next = item.variants.findIndex((v) => !failed.includes(v.sourceKey));
-    if (next < 0 || next === lineIdx) return;
-
-    /*
-     * 换源时保留当前集号（按新线路的集数夹紧），不要重置到第 1 集。
-     * 用户看到第 12 集时线路挂了，突然跳回第 1 集是明显的体验断裂；
-     * 各站集号命名不同（第1集 / 第01集），所以只搬「序号」不搬名称。
-     */
-    const nextTotal = item.variants[next].lines[0]?.episodes.length ?? 1;
-    toast(`线路不可用，已自动切换到「${item.variants[next].sourceName}」`);
-    setLineIdx(next);
-    setEpIdx(Math.max(0, Math.min(epIndex, nextTotal - 1)));
+    const currentFailure = current ? failureKey(current, selection.lineIdx) : '';
+    const nextFailed = new Set(failedRef.current);
+    if (currentFailure) nextFailed.add(currentFailure);
+    setFailed(nextFailed);
+    const next = nextPlayable(item, selection, nextFailed);
+    if (!next) return;
+    toast('线路不可用，已自动切换并保留当前集数');
+    changeSelection(next);
   };
 
-  /** 播完自动进入下一集，追剧时不必每次退回选集手动点 */
   const onEnded = () => {
-    if (epIdx + 1 < epTotal) {
-      const nextIdx = epIdx + 1;
-      const nextEp = line?.episodes[nextIdx];
-      /*
-       * 进度改为事件落盘后（不再每 5 秒写历史），自动连播必须立刻给新集
-       * 建一条 0 进度记录：否则连播后直接锁屏/杀 App，历史仍停在上一集
-       * 结尾，下次进来会重看上一集片尾。
-       */
-      if (item && current && settings.recordHistory && nextEp) {
-        rememberPlay({
-          key: item.key,
-          name: item.name,
-          pic: item.pic,
-          sourceKey: current.sourceKey,
-          sourceName: current.sourceName,
-          vodId: current.vodId,
-          episodeIndex: nextIdx,
-          episodeName: nextEp.name,
-          position: 0,
-          duration: 0,
-          updatedAt: Date.now(),
-        });
-      }
-      setEpIdx(nextIdx);
+    const nextIdx = selection.epIdx + 1;
+    if (!line || nextIdx >= epTotal) return;
+    const nextEp = line.episodes[nextIdx];
+    if (item && current && settings.recordHistory && nextEp) {
+      rememberPlay({
+        key: item.key, name: item.name, pic: item.pic,
+        sourceKey: current.sourceKey, sourceName: current.sourceName, vodId: current.vodId,
+        episodeIndex: nextIdx, episodeName: nextEp.name, position: 0, duration: 0, updatedAt: Date.now(),
+      });
     }
+    changeSelection({ ...selection, epIdx: nextIdx });
   };
 
   if (!item) {
-    // 还在搜索 → 转圈；已搜完且没有 → 明确报未找到，避免一直转圈
-    if (!notFound) {
-      return (
-        <div className="player-page">
-          <div className="empty" style={{ margin: 'auto' }}>
-            <div className="spinner" style={{ margin: '0 auto 12px' }} />
-            <div>正在获取播放地址…</div>
-          </div>
-        </div>
-      );
-    }
     return (
       <div className="player-page">
-        <div className="player-bar">
-          <button className="icon-btn" onClick={() => nav(-1)} aria-label="返回">
-            <BackIcon />
-          </button>
-        </div>
+        <PlayerBar title={name || '播放'} onBack={() => nav(-1)} />
         <div className="empty" style={{ margin: 'auto' }}>
-          <div className="empty-icon">📭</div>
-          <div>未找到「{name}」</div>
-          <div className="hint">该片名在当前资源源里已不存在，请返回重新搜索</div>
+          {notFound ? (
+            <>
+              <div className="empty-icon">📭</div>
+              <div>未找到「{name || '该影片'}」</div>
+              <div className="hint">地址可能已失效，请重新搜索，或检查网络与资源源设置。</div>
+              <button className="btn primary" style={{ maxWidth: 220 }} onClick={() => nav(`/?q=${encodeURIComponent(name)}`)}>返回搜索</button>
+            </>
+          ) : (
+            <>
+              <div className="spinner" style={{ margin: '0 auto 12px' }} />
+              <div>正在获取播放地址…</div>
+              <button className="btn" style={{ maxWidth: 180, margin: '12px auto 0' }} onClick={() => nav(-1)}>取消并返回</button>
+            </>
+          )}
         </div>
       </div>
     );
@@ -176,178 +173,101 @@ export default function Play() {
   if (!episode) {
     return (
       <div className="player-page">
-        <div className="player-bar">
-          <button className="icon-btn" onClick={() => nav(-1)} aria-label="返回">
-            <BackIcon />
-          </button>
-          <div className="player-title">{item.name}</div>
-        </div>
+        <PlayerBar title={item.name} onBack={() => nav(-1)} />
         <div className="empty" style={{ margin: 'auto' }}>
-          <div className="empty-icon">🎞️</div>
-          <div>该来源没有可直接播放的地址</div>
-          <div className="hint">请返回详情页切换其他来源</div>
+          <div className="empty-icon">🎞️</div><div>该来源没有可直接播放的地址</div>
+          <button className="btn primary" style={{ maxWidth: 220 }} onClick={() => nav(`/detail/${encodeURIComponent(item.key)}?name=${encodeURIComponent(item.name)}`, { state: { item } })}>返回详情切换来源</button>
         </div>
       </div>
     );
   }
 
-  const allFailed = item.variants.every((v) => failedSources.includes(v.sourceKey));
-
   return (
     <div className="player-page">
       <div className="player-bar">
-        <button className="icon-btn" onClick={() => nav(-1)} aria-label="返回">
-          <BackIcon />
-        </button>
-        <div className="player-title">
-          {item.name} · {episode.name}
-        </div>
-        {item.variants.length > 1 && (
-          <button
-            className="icon-btn"
-            onClick={() => setShowLines((v) => !v)}
-            aria-label="切换来源"
-            aria-expanded={showLines}
-          >
-            <SwitchIcon />
-          </button>
-        )}
+        <button className="icon-btn" onClick={() => nav(-1)} aria-label="返回"><BackIcon /></button>
+        <div className="player-title">{item.name} · {episode.name}</div>
+        <button className="icon-btn" onClick={() => setShowLines((v) => !v)} aria-label="切换来源" aria-expanded={showLines}><SwitchIcon /></button>
       </div>
-
       <div className="player-stage">
-        <Player
-          src={episode.url}
-          startAt={startAt}
-          autoPlay
-          onProgress={onProgress}
-          onError={onError}
-          onEnded={onEnded}
-          /*
-           * 起播成功即宣告当前线路恢复：清空全部失败标记。
-           * 否则「所有来源均失败 → 手动点回某个源重试成功」后，
-           * 该源仍带着死亡记录（透明度 0.5、下次被自动换源跳过）。
-           */
-          onPlaying={() => setFailedSources([])}
-        />
+        <Player src={episode.url} startAt={startAt} autoPlay retryKey={retryKey}
+          onProgress={onProgress} onError={onError} onEnded={onEnded}
+          onRetry={() => {
+            if (failed.has(current ? failureKey(current, selection.lineIdx) : '')) {
+              setFailed(new Set());
+            }
+            setRetryKey((n) => n + 1);
+          }}
+          onPlaying={() => setFailed(new Set())} />
       </div>
-
       <div className="player-below">
         <div className="player-info">
           <div className="player-info-main">
-            <div className="t">{current?.sourceName}</div>
-            <div className="d">
-              {epTotal > 1 ? `已选 ${episode.name} · 共 ${epTotal} 集` : '单集影片'}
-            </div>
+            <div className="t">{current?.sourceName} · {line?.name}</div>
+            <div className="d">{epTotal > 1 ? `已选 ${episode.name} · 共 ${epTotal} 集` : '单集影片'}</div>
           </div>
-          {item.variants.length > 1 && (
-            <button className="row-action" onClick={() => setShowLines((v) => !v)}>
-              {showLines ? '收起' : `切换来源 ${item.variants.length}`}
-            </button>
-          )}
+          <button className="row-action" onClick={() => setShowLines((v) => !v)}>{showLines ? '收起' : '来源与线路'}</button>
         </div>
-
         {showLines && (
           <>
-            <div className="group-title">来源线路（失败会自动跳过）</div>
+            <div className="group-title">来源（换源保留当前集数）</div>
             <div className="line-tabs">
-              {item.variants.map((v, i) => {
-                const dead = failedSources.includes(v.sourceKey);
-                return (
-                  <button
-                    key={v.sourceKey}
-                    className={`line-tab${i === lineIdx ? ' active' : ''}`}
-                    onClick={() => {
-                      // 失败过的源仍允许手动重试（临时故障很常见），但要明说，别让用户对着半透明按钮猜
-                      if (dead && i !== lineIdx) {
-                        toast(`「${v.sourceName}」刚才失败过，正在重试；成功后会自动恢复标记`);
-                      }
-                      setLineIdx(i);
-                      setEpIdx(0);
-                    }}
-                    style={dead ? { opacity: 0.5 } : undefined}
-                  >
-                    {!dead && <span className="dot" />}
-                    {v.sourceName}
-                  </button>
-                );
-              })}
+              {item.variants.map((v, i) => (
+                <button key={`${v.sourceKey}:${v.vodId}`} className={`line-tab${i === selection.variantIdx ? ' active' : ''}`}
+                  onClick={() => changeSelection({ ...selection, variantIdx: i, lineIdx: 0 })}
+                  aria-pressed={i === selection.variantIdx}>
+                  {v.sourceName}
+                </button>
+              ))}
             </div>
+            {current && current.lines.length > 1 && (
+              <>
+                <div className="group-title">同源线路</div>
+                <div className="line-tabs">
+                  {current.lines.map((l, i) => (
+                    <button key={`${l.name}:${i}`} className={`line-tab${i === selection.lineIdx ? ' active' : ''}`}
+                      onClick={() => changeSelection({ ...selection, lineIdx: i })} aria-pressed={i === selection.lineIdx}>
+                      {l.direct && <span className="dot" />}{l.name} · {l.episodes.length}集
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
-
-        {/*
-          选集常驻显示，不再折叠。
-          用户从详情页进来就是为了接着往下看，选集是这里最高频的操作，
-          藏进「切换」按钮后面等于让每次切集都多两步。
-        */}
         {epTotal > 1 ? (
           <>
-            <div className="ep-head">
-              <span className="group-title" style={{ margin: 0 }}>
-                选集
-              </span>
-              <span className="ep-count">
-                {epIndex + 1} / {epTotal}
-              </span>
-            </div>
+            <div className="ep-head"><span className="group-title" style={{ margin: 0 }}>选集</span><span className="ep-count">{selection.epIdx + 1} / {epTotal}</span></div>
             <div className="ep-grid">
-              {line?.episodes.map((ep) => {
-                const active = ep.index === epIndex;
-                return (
-                  <button
-                    key={ep.index}
-                    ref={active ? activeEpRef : undefined}
-                    className={`ep-btn${active ? ' active' : ''}`}
-                    onClick={() => setEpIdx(ep.index)}
-                    aria-current={active ? 'true' : undefined}
-                  >
-                    {ep.name}
-                  </button>
-                );
-              })}
+              {line?.episodes.map((ep) => (
+                <button key={ep.index} ref={ep.index === selection.epIdx ? activeEpRef : undefined}
+                  className={`ep-btn${ep.index === selection.epIdx ? ' active' : ''}`}
+                  onClick={() => changeSelection({ ...selection, epIdx: ep.index })} aria-current={ep.index === selection.epIdx ? 'true' : undefined}>{ep.name}</button>
+              ))}
             </div>
           </>
-        ) : (
-          <div className="hint">该来源只提供了 1 个可直接播放的地址。</div>
-        )}
-
-        {allFailed && (
-          <div className="hint" style={{ color: 'var(--danger)' }}>
-            所有来源线路均无法播放。这类情况通常是资源站临时故障或网络受限，
-            可返回搜索页换一个片名（不同资源站的片源不同）。
-          </div>
+        ) : <div className="hint">该来源只提供了 1 个可直接播放的地址。</div>}
+        {failed.size > 0 && <button className="btn" style={{ marginTop: 14 }} onClick={() => { setFailed(new Set()); setRetryKey((n) => n + 1); }}>清除失败标记，重试当前线路</button>}
+        {failed.size >= item.variants.reduce((sum, v) => sum + v.lines.length, 0) && (
+          <div className="hint" style={{ color: 'var(--danger)' }}>已尝试全部来源与线路，仍无法播放。请重试，或检查网络后返回搜索。</div>
         )}
       </div>
     </div>
   );
 }
 
-function BackIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
-      <path
-        d="M15 19l-7-7 7-7"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+function routeFrom(sp: URLSearchParams) {
+  return { source: sp.get('source') || '', vodId: sp.get('vod') || undefined, line: nonNegativeInt(sp.get('line')), ep: nonNegativeInt(sp.get('ep')) };
 }
-
+function sameSelection(a: PlaySelection, b: PlaySelection) {
+  return a.variantIdx === b.variantIdx && a.lineIdx === b.lineIdx && a.epIdx === b.epIdx;
+}
+function PlayerBar({ title, onBack }: { title: string; onBack: () => void }) {
+  return <div className="player-bar"><button className="icon-btn" onClick={onBack} aria-label="返回"><BackIcon /></button><div className="player-title">{title}</div></div>;
+}
+function BackIcon() {
+  return <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M15 19l-7-7 7-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
 function SwitchIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-      <path
-        d="M3 8h13l-3-3M21 16H8l3 3"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 8h13l-3-3M21 16H8l3 3" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Modal from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { buildApiUrl, httpGetJson, probeSources, type SourceConfig, type SourceStatus } from '../core';
 import { useApp } from '../state/AppState';
@@ -27,11 +28,13 @@ export default function Settings() {
     persistHealth,
     resetHealth,
     ready,
+    restoreSource,
   } = useApp();
 
   const [probing, setProbing] = useState(false);
   const [probeResult, setProbeResult] = useState<Record<string, SourceStatus>>({});
   const [showAdd, setShowAdd] = useState(false);
+  const [confirm, setConfirm] = useState<'reset' | 'health' | null>(null);
   const [form, setForm] = useState({ name: '', api: '' });
   /** 添加中的协议预检，防止重复提交 */
   const [adding, setAdding] = useState(false);
@@ -168,10 +171,15 @@ export default function Settings() {
               <button
                 className={`switch${s.enabled ? ' on' : ''}`}
                 onClick={() => updateSource(s.key, { enabled: !s.enabled })}
-                aria-label={s.enabled ? '停用' : '启用'}
+                role="switch"
+                aria-checked={s.enabled}
+                aria-label={`${s.name}：${s.enabled ? '已启用' : '已停用'}`}
               />
               {!s.builtin && (
-                <button className="row-action" onClick={() => removeSource(s.key)}>
+                <button className="row-action" onClick={() => {
+                  removeSource(s.key);
+                  toast(`已删除「${s.name}」`, { label: '撤销', onClick: () => restoreSource(s) });
+                }}>
                   删除
                 </button>
               )}
@@ -184,10 +192,12 @@ export default function Settings() {
       <div className="group">
         <div className="setting-row">
           <div className="setting-label">
-            <div className="t">请求超时</div>
+            <div className="t"><label htmlFor="request-timeout">请求超时</label></div>
             <div className="d">单个源等待上限，越短搜得越快但可能漏掉慢源</div>
           </div>
           <select
+            id="request-timeout"
+            aria-label="单个资源源请求超时"
             value={settings.timeoutMs}
             onChange={(e) => setSettings({ timeoutMs: Number(e.target.value) })}
             style={{
@@ -212,6 +222,8 @@ export default function Settings() {
           <button
             className={`switch${settings.recordHistory ? ' on' : ''}`}
             onClick={() => setSettings({ recordHistory: !settings.recordHistory })}
+            role="switch"
+            aria-checked={settings.recordHistory}
             aria-label="记录观看进度"
           />
         </div>
@@ -235,12 +247,7 @@ export default function Settings() {
           </div>
           <button
             className="row-action"
-            onClick={() => {
-              resetSources();
-              resetHealth();
-              setProbeResult({});
-              toast('已重置为内置源');
-            }}
+            onClick={() => setConfirm('reset')}
           >
             重置
           </button>
@@ -252,11 +259,7 @@ export default function Settings() {
           </div>
           <button
             className="row-action"
-            onClick={() => {
-              resetHealth();
-              setProbeResult({});
-              toast('健康度记录已清空');
-            }}
+            onClick={() => setConfirm('health')}
           >
             清空
           </button>
@@ -270,21 +273,22 @@ export default function Settings() {
       </div>
 
       {showAdd && (
-        <div className="modal-mask" onClick={() => setShowAdd(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <Modal title="添加资源源" onClose={() => { if (!adding) setShowAdd(false); }}>
             <h3>添加资源源</h3>
             <div className="page-sub">支持苹果 CMS（MacCMS）vod 协议的采集接口</div>
             <div className="field">
-              <label>名称</label>
+              <label htmlFor="source-name">名称</label>
               <input
+                id="source-name"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="例如 我的资源站"
               />
             </div>
             <div className="field">
-              <label>接口地址</label>
+              <label htmlFor="source-api">接口地址</label>
               <input
+                id="source-api"
                 value={form.api}
                 onChange={(e) => setForm({ ...form, api: e.target.value })}
                 placeholder="https://example.com/api.php/provide/vod"
@@ -294,15 +298,29 @@ export default function Settings() {
               />
             </div>
             <div className="modal-actions">
-              <button className="btn" onClick={() => setShowAdd(false)}>
+              <button className="btn" onClick={() => setShowAdd(false)} disabled={adding}>
                 取消
               </button>
               <button className="btn primary" disabled={adding} onClick={() => void submitAdd()}>
                 {adding ? '验证中…' : '添加'}
               </button>
             </div>
+        </Modal>
+      )}
+      {confirm && (
+        <Modal title={confirm === 'reset' ? '重置源列表' : '清空健康度记录'} onClose={() => setConfirm(null)}>
+          <h3>{confirm === 'reset' ? '确认重置源列表？' : '确认清空健康度记录？'}</h3>
+          <p className="hint">{confirm === 'reset' ? '自定义源将被删除，所有内置源恢复启用；此操作不能撤销。' : '成功率、响应时间和失败记录将永久清除；此操作不能撤销。'}</p>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setConfirm(null)}>取消</button>
+            <button className="btn primary" onClick={() => {
+              if (confirm === 'reset') { resetSources(); resetHealth(); toast('已重置为内置源'); }
+              else { resetHealth(); toast('健康度记录已清空'); }
+              setProbeResult({});
+              setConfirm(null);
+            }}>确认{confirm === 'reset' ? '重置' : '清空'}</button>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

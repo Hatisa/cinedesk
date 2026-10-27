@@ -182,7 +182,7 @@ export function classifyContent(input: {
   }
 
   const shortDrama = isShortDramaClass(classText);
-  const tier: ContentTier = score > 0 ? 'mainstream' : shortDrama ? 'shortDrama' : 'general';
+  const tier: ContentTier = shortDrama ? 'shortDrama' : score > 0 ? 'mainstream' : 'general';
   return { adult: false, shortDrama, tier };
 }
 
@@ -196,9 +196,14 @@ export function classifyContent(input: {
  *
  * 单独抽成函数是为了便于测试，聚合层只负责调用。
  */
-export function contentRank(input: { score: number; shortDrama: boolean }): number {
-  if (input.score > 0) return 0;
-  return input.shortDrama ? 2 : 1;
+export function contentRank(input: {
+  score: number;
+  scoreSource?: 'douban' | 'site' | null;
+  shortDrama: boolean;
+}): number {
+  // 短剧始终沉底；站内高分也不能冒充豆瓣分获得主流层级。
+  if (input.shortDrama) return 2;
+  return input.score > 0 && input.scoreSource !== 'site' ? 0 : 1;
 }
 
 /**
