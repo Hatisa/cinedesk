@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useToast } from '../components/Toast';
-import { buildApiUrl, httpGetJson, probeSources, type Quality, type SourceConfig, type SourceStatus } from '../core';
+import { buildApiUrl, httpGetJson, probeSources, type SourceConfig, type SourceStatus } from '../core';
 import { useApp } from '../state/AppState';
 
 /** 从接口地址推导一个稳定的源标识 */
@@ -214,34 +214,6 @@ export default function Settings() {
             onClick={() => setSettings({ recordHistory: !settings.recordHistory })}
             aria-label="记录观看进度"
           />
-        </div>
-        <div className="setting-row">
-          <div className="setting-label">
-            <div className="t">缓存画质</div>
-            <div className="d">
-              默认最高。缓存是下载一次长期看，画质优先；存储紧张可降到标清或流畅。
-              {/*
-                只对之后新加入队列的集生效：已在下载中的任务已经取过播放列表，
-                中途换画质会让同一集里混入不同清晰度的分片。
-              */}
-              （对之后新缓存的集生效）
-            </div>
-          </div>
-          <select
-            value={settings.cacheQuality}
-            onChange={(e) => setSettings({ cacheQuality: e.target.value as Quality })}
-            style={{
-              background: 'var(--bg-card)',
-              border: '1px solid var(--line)',
-              borderRadius: 8,
-              color: 'var(--text)',
-              padding: '7px 9px',
-            }}
-          >
-            <option value="high">最高（高清）</option>
-            <option value="mid">标清</option>
-            <option value="low">流畅（省空间）</option>
-          </select>
         </div>
         <div className="setting-row">
           <div className="setting-label">

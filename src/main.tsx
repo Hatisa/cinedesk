@@ -4,7 +4,6 @@ import { HashRouter } from 'react-router-dom';
 import App from './App';
 import { ToastProvider } from './components/Toast';
 import { AppProvider } from './state/AppState';
-import { DownloadProvider } from './state/downloadManager';
 import './styles.css';
 
 const root = document.getElementById('root');
@@ -16,13 +15,7 @@ createRoot(root).render(
     <HashRouter>
       <AppProvider>
         <ToastProvider>
-          {/*
-            DownloadProvider 必须在 AppProvider 之内：它要读写离线索引
-            （useApp），并依赖其状态判断某集是否已缓存。
-          */}
-          <DownloadProvider>
-            <App />
-          </DownloadProvider>
+          <App />
         </ToastProvider>
       </AppProvider>
     </HashRouter>

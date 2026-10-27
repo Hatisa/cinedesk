@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import BottomNav from './components/BottomNav';
 import Detail from './pages/Detail';
-import Downloads from './pages/Downloads';
 import Favorites from './pages/Favorites';
 import Home from './pages/Home';
 import Play from './pages/Play';
@@ -54,7 +53,6 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/detail/:key" element={<Detail />} />
         <Route path="/play/:key" element={<Play />} />
-        <Route path="/downloads" element={<Downloads />} />
         <Route path="/favorites" element={<Favorites />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Home />} />

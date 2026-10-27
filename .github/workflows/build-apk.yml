@@ -67,12 +67,6 @@ jobs:
       - name: 同步 Web 资源与插件到原生工程
         run: npx cap sync android
 
-      # 前台服务（后台下载保活）的权限与 service/receiver 必须注入到 app 的
-      # manifest：插件只在它自己的 manifest 里声明了 POST_NOTIFICATIONS。
-      # 这一步必须在 cap add/sync 之后、编译之前执行。
-      - name: 注入后台下载所需的原生配置
-        run: npm run patch:android
-
       - name: 生成应用图标与启动图
         run: |
           if [ -f resources/icon.png ]; then

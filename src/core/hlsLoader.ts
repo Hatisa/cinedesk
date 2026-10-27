@@ -90,18 +90,6 @@ function normalizeHeaders(raw: unknown): Record<string, string> {
   return out;
 }
 
-/**
- * 是否为设备上的本地文件地址。
- *
- * Capacitor 的 convertFileSrc 把本地路径转成
- * `https://localhost/_capacitor_file_/<path>` 这种形式（见 native-bridge.js
- * convertFileSrcServerUrl），由 WebView 的本地文件服务应答。
- * 这类地址必须走 WebView 自身请求，不能交给原生 OkHttp。
- */
-function isLocalUrl(url: string): boolean {
-  return url.includes('/_capacitor_file_') || url.startsWith('file://');
-}
-
 interface RawResponse {
   status: number;
   data: unknown;
@@ -182,7 +170,7 @@ export class NativeHttpLoader extends BaseLoader {
   }
 
   /** 原生平台走 OkHttp（同时绕开 CORS 与 Referer 校验）；浏览器开发时直连 */
-  protected async fetchOnce(
+  private async fetchOnce(
     context: LoaderContext,
     isBinary: boolean,
     timeout: number,
@@ -205,7 +193,7 @@ export class NativeHttpLoader extends BaseLoader {
       headers.Range = `bytes=${context.rangeStart ?? 0}-${context.rangeEnd - 1}`;
     }
 
-    if (Capacitor.isNativePlatform() && !isLocalUrl(context.url)) {
+    if (Capacitor.isNativePlatform()) {
       const res = await CapacitorHttp.request({
         url: context.url,
         method: 'GET',
@@ -221,13 +209,6 @@ export class NativeHttpLoader extends BaseLoader {
       };
     }
 
-    /*
-     * 本地缓存文件必须走这条路径（WebView 自己的请求），不能交给 OkHttp：
-     * 缓存文件在应用私有目录里，OkHttp 拿到的是 localhost 的
-     * `_capacitor_file_` 地址，只能由 WebView 的本地文件服务应答。
-     * Capacitor 的 fetch 补丁识别出 serverUrl 前缀后会自动走 CapacitorWebFetch，
-     * 因此这里直接 fetch 即可，且它能正确处理 Range（拖动进度）。
-     */
     const res = await fetch(context.url, { headers });
     const data: unknown = isBinary ? await res.arrayBuffer() : await res.text();
     const hdrs: Record<string, string> = {};

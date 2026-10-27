@@ -3,12 +3,6 @@ import { NavLink } from 'react-router-dom';
 const TABS = [
   { to: '/', label: '搜索', icon: 'M21 21l-4.35-4.35M11 19a8 8 0 110-16 8 8 0 010 16z' },
   {
-    to: '/downloads',
-    label: '缓存',
-    // 下载箭头 + 托盘：表示「已存到本地」
-    icon: 'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3',
-  },
-  {
     to: '/favorites',
     label: '收藏',
     icon: 'M12 17.3l-6.16 3.7 1.64-7.03L2 9.24l7.19-.61L12 2l2.81 6.63 7.19.61-5.48 4.73 1.64 7.03z',

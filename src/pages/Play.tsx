@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import Player from '../components/Player';
 import { useToast } from '../components/Toast';
-import { getItem, localPlaylistUrl, putItems, searchAll, type AggregatedItem } from '../core';
+import { getItem, putItems, searchAll, type AggregatedItem } from '../core';
 import { useApp } from '../state/AppState';
 
 export default function Play() {
@@ -11,7 +11,7 @@ export default function Play() {
   const nav = useNavigate();
   const loc = useLocation();
   const toast = useToast();
-  const { sources, health, settings, history, rememberPlay, persistHealth, cachedEpisode } = useApp();
+  const { sources, health, settings, history, rememberPlay, persistHealth } = useApp();
 
   const passed = (loc.state as { item?: AggregatedItem } | null)?.item;
   const [item, setItem] = useState<AggregatedItem | null>(passed ?? getItem(key));
@@ -60,32 +60,6 @@ export default function Play() {
    */
   const epIndex = Math.min(epIdx, Math.max(0, epTotal - 1));
   const episode = line?.episodes[epIndex] ?? null;
-
-  /*
-   * 离线优先：这一集若已缓存，直接播本地文件。
-   *
-   * 关键是**先判断再决定 src**，不能让播放器先去试在线地址：
-   * 没网时在线请求要等全部超时重试才失败，用户看到的是长时间的
-   * 「正在缓冲」——而离线场景恰恰是这个功能存在的意义。
-   */
-  const cached = item && episode ? cachedEpisode(item.key, epIndex) : undefined;
-  const [localSrc, setLocalSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!cached) {
-      setLocalSrc(null);
-      return;
-    }
-    let alive = true;
-    void (async () => {
-      const url = await localPlaylistUrl(cached);
-      // 生成失败（如文件被系统清理）时保持 null，自动回退在线播放
-      if (alive) setLocalSrc(url);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [cached]);
 
   // 续播：仅当历史记录的集数与当前集一致时才跳转
   const hist = item ? history.find((h) => h.key === item.key) : undefined;
@@ -241,41 +215,26 @@ export default function Play() {
       </div>
 
       <div className="player-stage">
-        {/*
-         * 已缓存但本地播放列表还没生成好时，先不挂播放器：
-         * 这一瞬间若挂上会以在线地址起播，没网时又变成「一直缓冲」。
-         * 生成很快（一两次原生桥调用），短暂占位即可。
-         */}
-        {cached && !localSrc ? (
-          <div className="player-loading">
-            <div className="spinner" />
-            <div>正在读取本地缓存…</div>
-          </div>
-        ) : (
-          <Player
-            src={localSrc ?? episode.url}
-            startAt={startAt}
-            autoPlay
-            onProgress={onProgress}
-            onError={onError}
-            onEnded={onEnded}
-            /*
-             * 起播成功即宣告当前线路恢复：清空全部失败标记。
-             * 否则「所有来源均失败 → 手动点回某个源重试成功」后，
-             * 该源仍带着死亡记录（透明度 0.5、下次被自动换源跳过）。
-             */
-            onPlaying={() => setFailedSources([])}
-          />
-        )}
+        <Player
+          src={episode.url}
+          startAt={startAt}
+          autoPlay
+          onProgress={onProgress}
+          onError={onError}
+          onEnded={onEnded}
+          /*
+           * 起播成功即宣告当前线路恢复：清空全部失败标记。
+           * 否则「所有来源均失败 → 手动点回某个源重试成功」后，
+           * 该源仍带着死亡记录（透明度 0.5、下次被自动换源跳过）。
+           */
+          onPlaying={() => setFailedSources([])}
+        />
       </div>
 
       <div className="player-below">
         <div className="player-info">
           <div className="player-info-main">
-            <div className="t">
-              {current?.sourceName}
-              {cached && <span className="badge-offline">已缓存</span>}
-            </div>
+            <div className="t">{current?.sourceName}</div>
             <div className="d">
               {epTotal > 1 ? `已选 ${episode.name} · 共 ${epTotal} 集` : '单集影片'}
             </div>
