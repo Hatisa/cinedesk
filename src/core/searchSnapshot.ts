@@ -1,4 +1,5 @@
 import type { AggregatedItem, SourceStatus } from './types';
+import { normalizeSearchFilters, type SearchFilters } from './searchFilters.ts';
 
 export interface SearchSnapshot {
   keyword: string;
@@ -7,6 +8,8 @@ export interface SearchSnapshot {
   totalMs: number;
   savedAt?: number;
   scrollY?: number;
+  /** 返回详情或刷新后，仍保留当前搜索结果的筛选条件。 */
+  filters?: SearchFilters;
 }
 
 export const SEARCH_TTL = 24 * 60 * 60 * 1000;
@@ -18,5 +21,5 @@ export function normalizeSearchSnapshot(value: unknown, now = Date.now()): Searc
   const s = value as Partial<SearchSnapshot>;
   if (typeof s.keyword !== 'string' || !s.keyword.trim() || !Array.isArray(s.items) || !Array.isArray(s.statuses)) return null;
   if (typeof s.savedAt !== 'number' || !Number.isFinite(s.savedAt) || now - s.savedAt > SEARCH_TTL || s.savedAt > now + 60000) return null;
-  return { ...s, keyword: s.keyword, items: s.items.slice(0, SEARCH_ITEM_MAX), totalMs: typeof s.totalMs === 'number' ? s.totalMs : 0, scrollY: Math.max(0, s.scrollY ?? 0) } as SearchSnapshot;
+  return { ...s, keyword: s.keyword, items: s.items.slice(0, SEARCH_ITEM_MAX), totalMs: typeof s.totalMs === 'number' ? s.totalMs : 0, scrollY: Math.max(0, s.scrollY ?? 0), filters: normalizeSearchFilters(s.filters) } as SearchSnapshot;
 }

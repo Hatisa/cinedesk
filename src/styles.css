@@ -248,6 +248,127 @@ img {
   transform: scale(0.96);
 }
 
+/* ============ 搜索结果筛选 ============ */
+.search-filter {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+
+.filter-summary {
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+}
+
+.filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  padding: 0 13px;
+  text-align: left;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.filter-summary-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.filter-summary-value.active {
+  color: var(--accent);
+}
+
+.filter-chevron {
+  margin-left: auto;
+  flex: 0 0 auto;
+  transition: transform 0.18s var(--ease);
+}
+
+.expanded .filter-chevron {
+  transform: rotate(180deg);
+}
+
+.filter-count {
+  flex: 0 0 auto;
+  padding: 0 13px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-options {
+  border-top: 1px solid var(--line);
+  padding: 6px 13px 9px;
+}
+
+.filter-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 7px 0;
+}
+
+.filter-label {
+  flex: 0 0 auto;
+  padding-top: 5px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.filter-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.filter-option {
+  min-height: 30px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+
+.filter-option.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.filter-reset {
+  margin: 7px 0 0 39px;
+  min-height: 32px;
+  color: var(--accent);
+  font-size: 12.5px;
+}
+
+.search-result-grid {
+  margin-top: 14px;
+}
+
+.filter-empty {
+  margin-top: 14px;
+  padding: 26px 16px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.filter-empty .btn {
+  margin-top: 16px;
+}
+
 /* ============ 实时热搜榜 ============ */
 .trend-box {
   margin-top: 14px;

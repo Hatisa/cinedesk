@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import VodCard from '../components/VodCard';
+import SearchFilterBar from '../components/SearchFilterBar';
 import { useToast } from '../components/Toast';
 import {
   FALLBACK_TRENDING,
@@ -15,6 +16,9 @@ import {
   refreshTrending,
   saveJSON,
   searchAll,
+  EMPTY_SEARCH_FILTERS,
+  filterSearchItems,
+  type SearchFilters,
   type AggregatedItem,
   type SourceStatus,
   type TrendingMap,
@@ -37,6 +41,8 @@ export default function Home() {
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(search !== null);
   const [totalMs, setTotalMs] = useState(search?.totalMs ?? 0);
+  const [filters, setFilters] = useState<SearchFilters>(() => search?.filters ?? { ...EMPTY_SEARCH_FILTERS });
+  const filteredItems = useMemo(() => filterSearchItems(items, filters), [items, filters]);
   const [recent, setRecent] = useState<string[]>([]);
   // 搜索历史持久化：此前只存在内存里，App 重启即失；现在落盘，重启后仍在
   useEffect(() => {
@@ -57,8 +63,10 @@ export default function Home() {
   const scrollRef = useRef(search?.scrollY ?? 0);
   const itemsRef = useRef(items);
   const statusesRef = useRef(statuses);
+  const filtersRef = useRef(filters);
   itemsRef.current = items;
   statusesRef.current = statuses;
+  filtersRef.current = filters;
   useEffect(() => {
     const savePosition = () => { scrollRef.current = window.scrollY; };
     window.addEventListener('scroll', savePosition, { passive: true });
@@ -114,6 +122,7 @@ export default function Home() {
       setItems([]);
       setStatuses([]);
       setTotalMs(0);
+      setFilters({ ...EMPTY_SEARCH_FILTERS });
       setRecent((prev) => {
         const next = pushRecent(prev, kw);
         void saveJSON(KEYS.recent, next);
@@ -173,6 +182,7 @@ export default function Home() {
     setItems(search.items);
     setStatuses(search.statuses);
     setTotalMs(search.totalMs);
+    setFilters(search.filters ?? { ...EMPTY_SEARCH_FILTERS });
     setSearched(true);
     const frame = requestAnimationFrame(() => window.scrollTo({ top: search.scrollY ?? 0, behavior: 'instant' }));
     return () => cancelAnimationFrame(frame);
@@ -186,8 +196,14 @@ export default function Home() {
     }
   }, [ready]);
 
+  const changeFilters = (next: SearchFilters) => {
+    setFilters(next);
+    filtersRef.current = next;
+    if (search && search.keyword === keyword) setSearch({ ...search, filters: next });
+  };
+
   const openDetail = (item: AggregatedItem) => {
-    setSearch({ keyword, items: itemsRef.current, statuses: statusesRef.current, totalMs, scrollY: scrollRef.current, savedAt: search?.savedAt });
+    setSearch({ keyword, items: itemsRef.current, statuses: statusesRef.current, totalMs, scrollY: scrollRef.current, savedAt: search?.savedAt, filters: filtersRef.current });
     nav(`/detail/${encodeURIComponent(item.key)}?name=${encodeURIComponent(item.name)}`, {
       state: { item },
     });
@@ -353,11 +369,20 @@ export default function Home() {
             <span className="section-title">搜索结果</span>
             <span className="section-more">多来源已合并</span>
           </div>
-          <div className="grid">
-            {items.map((it) => (
-              <VodCard key={it.key} item={it} onClick={() => openDetail(it)} />
-            ))}
-          </div>
+          <SearchFilterBar value={filters} onChange={changeFilters} filtered={filteredItems.length} total={items.length} />
+          {filteredItems.length > 0 ? (
+            <div className="grid search-result-grid">
+              {filteredItems.map((it) => (
+                <VodCard key={it.key} item={it} onClick={() => openDetail(it)} />
+              ))}
+            </div>
+          ) : (
+            <div className="empty filter-empty">
+              <div>当前结果没有符合筛选条件的影片</div>
+              <div className="hint">试试减少一个条件，或清除筛选查看全部 {items.length} 部作品。</div>
+              <button className="btn" onClick={() => changeFilters({ ...EMPTY_SEARCH_FILTERS })}>清除筛选</button>
+            </div>
+          )}
         </>
       )}
 

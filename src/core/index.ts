@@ -11,6 +11,7 @@ export * from './work';
 export * from './playback';
 export * from './media';
 export * from './searchSnapshot';
+export * from './searchFilters';
 export * from './cache';
 export * from './trending';
 export * from './recommend';
