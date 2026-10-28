@@ -11,7 +11,12 @@ export default function Detail() {
   const nav = useNavigate();
   const loc = useLocation();
   const toast = useToast();
-  const { ready, sources, health, settings, history, toggleFav, isFavorite, restoreFavorites, persistHealth } = useApp();
+  const { ready, sources, health, settings, history, toggleFav, isFavorite, restoreFavorites, persistHealth, setSearch } = useApp();
+  const goHome = () => {
+    // 小房子表示回到全新首页；返回键仍保留搜索快照供继续浏览。
+    setSearch(null);
+    nav('/', { replace: true });
+  };
   const passed = (loc.state as { item?: AggregatedItem } | null)?.item;
   const meta = (loc.state as { meta?: { sourceKey: string; vodId: string } } | null)?.meta;
   const initialItem = passed ?? getItem(key);
@@ -84,7 +89,7 @@ export default function Detail() {
   if (loading) return <div className="page page-plain"><div className="empty"><div className="spinner" style={{ margin: '0 auto 12px' }} /><div>正在获取线路…</div><button className="btn" style={{ maxWidth: 180, margin: '16px auto' }} onClick={() => nav(-1)}>取消并返回</button></div></div>;
   if (!item) return (
     <div className="page page-plain">
-      <div className="detail-topbar"><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav(-1)} aria-label="返回"><BackIcon /></button><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav('/')} aria-label="回到首页"><HomeIcon /></button></div>
+      <div className="detail-topbar"><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav(-1)} aria-label="返回"><BackIcon /></button><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={goHome} aria-label="回到首页"><HomeIcon /></button></div>
       <div className="empty"><div className="empty-icon">📭</div><div>未找到该影片</div><div className="hint">可能来源已失效，请返回重新搜索</div><button className="btn primary" style={{ maxWidth: 220 }} onClick={() => nav(`/?q=${encodeURIComponent(name)}`)}>重新搜索</button></div>
     </div>
   );
@@ -99,7 +104,7 @@ export default function Detail() {
     <div className="page page-plain">
       <div className="detail-topbar">
         <button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav(-1)} aria-label="返回"><BackIcon /></button>
-        <button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav('/')} aria-label="回到首页"><HomeIcon /></button>
+        <button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={goHome} aria-label="回到首页"><HomeIcon /></button>
       </div>
       <div className="detail-hero">
         {item.pic && <div className="detail-bg" style={{ backgroundImage: `url("${item.pic}")` }} />}
