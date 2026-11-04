@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import PosterImage from '../components/PosterImage';
 import { useApp } from '../state/AppState';
 import { useToast } from '../components/Toast';
-import { fetchById, type FavoriteEntry, type HistoryEntry } from '../core';
+import { fetchById, formatWatchTime, latestWatchProgress, watchProgress, type FavoriteEntry, type HistoryEntry } from '../core';
 
 type SavedEntry = FavoriteEntry | HistoryEntry;
 const keyOf = (entry: Pick<SavedEntry, 'key' | 'sourceKey' | 'vodId'>) => `${entry.key}:${entry.sourceKey}:${entry.vodId}`;
@@ -64,7 +64,7 @@ export default function Favorites() {
     state: { meta: { sourceKey: entry.sourceKey, vodId: entry.vodId } },
   });
   const thumb = (entry: SavedEntry) => entry.pic
-    ? <PosterImage name={entry.name} urls={[entry.pic]} className="list-thumb" />
+    ? <PosterImage name={entry.name} urls={[entry.pic]} className="list-thumb" eager />
     : <div className="list-thumb poster-fallback">{entry.name.slice(0, 2)}</div>;
 
   return (
@@ -94,7 +94,7 @@ export default function Favorites() {
       {tab === 'fav' && (favorites.length === 0 ? (
         <div className="empty"><div className="empty-icon">⭐</div><div>还没有收藏</div><div className="hint">在影片详情页点「收藏」，方便下次直接找到</div></div>
       ) : (
-        <div className="list">{favorites.map((f) => {
+        <div className="list saved-list">{favorites.map((f) => {
           const key = keyOf(f);
           return <div className={`list-row${selected.has(key) ? ' selected' : ''}`} key={key}
             onContextMenu={(e) => { e.preventDefault(); startSelect(key); }}>
@@ -103,6 +103,16 @@ export default function Favorites() {
             <button className="list-body list-body-button" onClick={() => selecting ? toggleSelect(key) : toDetail(f)}>
               <div className="list-title">{f.name}</div>
               <div className="list-desc">{[f.year, f.remarks].filter(Boolean).join(' · ') || f.sourceName}</div>
+              {(() => {
+                const watched = latestWatchProgress(history, f);
+                if (!watched) return null;
+                const progress = watchProgress(watched);
+                return <>
+                  <div className="list-progress-text">{watched.episodeName || `第${watched.episodeIndex + 1}集`} · {progress.position > 0 ? `已看 ${progress.positionLabel}` : '尚未播放'}{progress.percent !== null ? ` · ${progress.percent}%` : ''}</div>
+                  {progress.duration > 0 && <div className="list-progress-meta">共 {progress.durationLabel} · 剩余 {formatWatchTime(Math.max(0, progress.duration - progress.position))}</div>}
+                  {progress.percent !== null && <div className="list-progress" role="progressbar" aria-label={`${f.name}观看进度`} aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100}><div className="list-progress-fill" style={{ width: `${progress.percent}%` }} /></div>}
+                </>;
+              })()}
               {updates[key] && <div className="update-badge">有更新 · {updates[key]}</div>}
             </button>
             {!selecting && <button className="row-action" onClick={() => { toggleFav(f); toast(`已移除「${f.name}」`, { label: '撤销', onClick: () => restoreFavorites([f]) }); }}>移除</button>}
@@ -115,16 +125,18 @@ export default function Favorites() {
       ) : (
         <>
           {!selecting && <div className="section-head"><span className="section-title">最近观看</span><button className="section-more" onClick={() => { const removed = [...history]; clearHistory(); toast('观看记录已清空', { label: '撤销', onClick: () => restoreHistory(removed) }); }}>清空</button></div>}
-          <div className="list">{history.map((h) => {
+          <div className="list saved-list">{history.map((h) => {
             const key = keyOf(h);
-            const pct = h.duration > 0 ? Math.min(100, Math.round((h.position / h.duration) * 100)) : 0;
+            const progress = watchProgress(h);
             return <div className={`list-row${selected.has(key) ? ' selected' : ''}`} key={key}>
               {selecting && <input className="select-check" type="checkbox" checked={selected.has(key)} onChange={() => toggleSelect(key)} aria-label={`选择 ${h.name}`} />}
               {thumb(h)}
               <button className="list-body list-body-button" onClick={() => selecting ? toggleSelect(key) : toDetail(h)}>
                 <div className="list-title">{h.name}</div>
-                <div className="list-desc">看到 {h.episodeName || `第${h.episodeIndex + 1}集`}{pct > 0 ? ` · ${pct}%` : ''} · {h.sourceName}</div>
-                {pct > 0 && <div className="list-progress"><div className="list-progress-fill" style={{ width: `${pct}%` }} /></div>}
+                <div className="list-desc">{h.episodeName || `第${h.episodeIndex + 1}集`} · {h.sourceName}</div>
+                <div className="list-progress-text">{progress.position > 0 ? `已看 ${progress.positionLabel}` : '尚未播放'}{progress.percent !== null ? ` · ${progress.percent}%` : ''}</div>
+                {progress.duration > 0 && <div className="list-progress-meta">共 {progress.durationLabel} · 剩余 {formatWatchTime(Math.max(0, progress.duration - progress.position))}</div>}
+                {progress.percent !== null && <div className="list-progress" role="progressbar" aria-label={`${h.name}观看进度`} aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100}><div className="list-progress-fill" style={{ width: `${progress.percent}%` }} /></div>}
               </button>
               {!selecting && <button className="row-action" onClick={() => { removeHistory(h); toast(`已删除「${h.name}」的观看记录`, { label: '撤销', onClick: () => restoreHistory([h]) }); }}>删除</button>}
             </div>;

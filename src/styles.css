@@ -672,6 +672,14 @@ img {
   background: var(--accent);
 }
 
+.list-progress-text {
+  margin-top: 5px;
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 /* ============ 列表（历史 / 源管理） ============ */
 .list {
   display: flex;
@@ -1634,6 +1642,19 @@ img {
 .select-check { width: 18px; height: 18px; accent-color: var(--accent); flex: 0 0 18px; }
 .list-thumb.poster-fallback { display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 14px; }
 .list-body-button { flex: 1; min-width: 0; text-align: left; }
+.poster-image.list-thumb { width: 56px; height: 80px; flex: 0 0 56px; overflow: hidden; border-radius: 7px; }
+.poster-image.list-thumb .poster-fallback { display: flex; align-items: center; justify-content: center; font-size: 11px; text-align: center; }
+.list-progress-text { margin-top: 6px; color: var(--accent); font-size: 12px; line-height: 1.5; white-space: normal; overflow-wrap: normal; word-break: keep-all; }
+.list-progress-meta { margin-top: 2px; color: var(--text-dim); font-size: 11px; line-height: 1.5; white-space: normal; }
+.saved-list { max-width: 720px; }
+.saved-list .list-row { align-items: flex-start; }
+.saved-list .list-body-button { padding: 2px 0; }
+.saved-list > .row-action { align-self: center; }
+@media (max-width: 480px) {
+  .poster-image.list-thumb { width: 52px; height: 74px; flex-basis: 52px; }
+  .saved-list .list-row { gap: 10px; padding: 10px; }
+  .saved-list .row-action { padding-inline: 4px; }
+}
 .update-badge { margin-top: 4px; color: var(--accent); font-size: 12px; }
 .danger-action { color: #f2b9b5; }
 

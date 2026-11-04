@@ -18,6 +18,7 @@ import {
   refreshTrending,
   saveJSON,
   searchAll,
+  watchProgress,
   EMPTY_SEARCH_FILTERS,
   filterSearchItems,
   groupSeries,
@@ -349,11 +350,12 @@ export default function Home() {
           {continueList.length > 0 && <section className="discover-section">
             <div className="section-head"><span className="section-title">继续观看</span><button className="section-more" onClick={() => nav('/favorites')}>全部记录</button></div>
             <div className="continue-row">{continueList.map((h) => {
-              const pct = h.duration > 0 ? Math.min(100, Math.round(h.position / h.duration * 100)) : 0;
+              const progress = watchProgress(h);
               return <button className="continue-card" key={`${h.key}:${h.sourceKey}:${h.vodId}`} onClick={() => nav(`/detail/${encodeURIComponent(h.key)}?name=${encodeURIComponent(h.name)}`, { state: { meta: { sourceKey: h.sourceKey, vodId: h.vodId } } })}>
                 <span className="continue-title">{h.name}</span>
-                <span className="continue-episode">{h.episodeName || `第${h.episodeIndex + 1}集`}{pct ? ` · ${pct}%` : ''}</span>
-                {pct > 0 && <span className="list-progress"><span className="list-progress-fill" style={{ width: `${pct}%` }} /></span>}
+                <span className="continue-episode">{h.episodeName || `第${h.episodeIndex + 1}集`}</span>
+                <span className="continue-progress">{progress.summary}</span>
+                {progress.percent !== null && <span className="list-progress"><span className="list-progress-fill" style={{ width: `${progress.percent}%` }} /></span>}
               </button>;
             })}</div>
           </section>}

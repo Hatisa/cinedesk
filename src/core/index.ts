@@ -19,4 +19,5 @@ export * from './recommend';
 export * from './hlsLoader';
 export * from './share';
 export * from './discover';
+export * from './progress';
 export * from './native';
