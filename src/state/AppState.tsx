@@ -18,6 +18,7 @@ import {
   DEFAULT_SETTINGS,
   HealthStore,
   KEYS,
+  clearDiscoveryCache,
   defaultSources,
   loadFavorites,
   loadHealth,
@@ -243,6 +244,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const resetHealth = useCallback(() => {
     healthRef.current.reset();
+    clearDiscoveryCache();
     persistHealth();
   }, [persistHealth]);
 

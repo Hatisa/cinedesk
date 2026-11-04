@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import PosterImage from './PosterImage';
 import { isShortDramaClass, shortRemarks } from '../core';
 import type { AggregatedItem } from '../core';
 
@@ -11,7 +11,6 @@ interface Props {
 
 /** 影片卡片。图片来自各资源站，可能防盗链，加载失败时退化为文字占位 */
 export default function VodCard({ item, onClick, showSources = true }: Props) {
-  const [broken, setBroken] = useState(false);
   const remarks = shortRemarks(item.remarks);
 
   // 分类只展示主分类（vod_class 常是「剧情,古装,内地剧」这样的多值串）
@@ -22,19 +21,7 @@ export default function VodCard({ item, onClick, showSources = true }: Props) {
   return (
     <button className="vod-card" onClick={onClick} type="button">
       <div className="vod-poster">
-        {item.pic && !broken ? (
-          <img
-            src={item.pic}
-            alt={item.name}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => setBroken(true)}
-          />
-        ) : (
-          <div className="poster-fallback">
-            <span>{item.name.slice(0, 4)}</span>
-          </div>
-        )}
+        <PosterImage name={item.name} urls={[item.pic, ...item.variants.map((v) => v.pic)]} />
         {remarks && <span className="badge-remarks">{remarks}</span>}
         {item.score > 0 && (
           <span className="badge-score" title={item.scoreSource === 'site' ? '站内评分' : '豆瓣评分'}>

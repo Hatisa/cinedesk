@@ -15,16 +15,38 @@ interface Props {
   onPlaying?: () => void;
 }
 type State = 'loading' | 'playing' | 'error';
+const RATES = [0.5, 1, 1.25, 1.5, 2];
 
 /** HLS 与直链视频共用一个 video，但每个地址独立管理资源、监听器和进度。 */
 export default function Player({ src, startAt = 0, autoPlay = true, retryKey = 0, onProgress, onError, onRetry, onEnded, onPlaying }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [state, setState] = useState<State>('loading');
   const [message, setMessage] = useState('');
+  const [rate, setRate] = useState(1);
+  const [locked, setLocked] = useState(false);
+  const [gesture, setGesture] = useState('');
+  const gestureTimer = useRef(0);
+  const pointers = useRef(new Map<number, { x: number; y: number; at: number }>());
+  const longPressTimer = useRef(0);
+  const seeking = useRef(false);
+  const rateRef = useRef(rate);
+  rateRef.current = rate;
   const cbRef = useRef({ onProgress, onError, onEnded, onPlaying });
   cbRef.current = { onProgress, onError, onEnded, onPlaying };
   const startAtRef = useRef(startAt);
   startAtRef.current = startAt;
+
+  const showGesture = (text: string) => {
+    window.clearTimeout(gestureTimer.current);
+    setGesture(text);
+    gestureTimer.current = window.setTimeout(() => setGesture(''), 900);
+  };
+  const seekBy = (seconds: number) => {
+    const video = videoRef.current;
+    if (!video || !Number.isFinite(video.duration)) return;
+    video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
+    showGesture(`${seconds > 0 ? '快进' : '快退'} ${Math.abs(seconds)} 秒`);
+  };
 
   // 全屏与横屏联动。标准事件与 WebView 私有属性都检查，离开页面恢复竖屏。
   useEffect(() => {
@@ -223,9 +245,73 @@ export default function Player({ src, startAt = 0, autoPlay = true, retryKey = 0
     };
   }, [src, retryKey]);
 
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (locked || state === 'error') return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY, at: Date.now() });
+    window.clearTimeout(longPressTimer.current);
+    longPressTimer.current = window.setTimeout(() => {
+      seeking.current = true;
+      const rect = event.currentTarget.getBoundingClientRect();
+      seekBy(event.clientX < rect.left + rect.width / 2 ? -10 : 10);
+    }, 450);
+  };
+  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = pointers.current.get(event.pointerId);
+    if (!start) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 14) {
+      window.clearTimeout(longPressTimer.current);
+      pointers.current.delete(event.pointerId);
+    }
+  };
+  const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    window.clearTimeout(longPressTimer.current);
+    pointers.current.delete(event.pointerId);
+    seeking.current = false;
+  };
+  const togglePlayback = () => {
+    const video = videoRef.current;
+    if (!video || locked) return;
+    if (video.paused) void video.play().catch(() => undefined);
+    else video.pause();
+    showGesture(video.paused ? '已暂停' : '继续播放');
+  };
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.playbackRate = rate;
+  }, [rate, src, retryKey]);
+  useEffect(() => () => {
+    window.clearTimeout(gestureTimer.current);
+    window.clearTimeout(longPressTimer.current);
+  }, []);
+
   return (
-    <>
-      <video ref={videoRef} controls playsInline webkit-playsinline="true" preload="metadata" poster="" />
+    <div
+      className={`player-surface${locked ? ' locked' : ''}`}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onDoubleClick={(event) => {
+        const target = event.target as HTMLElement;
+        if (!target.closest('button') && !(target instanceof HTMLVideoElement)) togglePlayback();
+      }}
+    >
+      <video ref={videoRef} controls={!locked} playsInline webkit-playsinline="true" preload="metadata" poster="" />
+      <div className="player-tools" aria-label="播放设置">
+        <div className="rate-tabs" aria-label="倍速播放">
+          {RATES.map((value) => (
+            <button key={value} type="button" className={`rate-btn${rate === value ? ' active' : ''}`}
+              aria-pressed={rate === value} onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => setRate(value)}>{value}x</button>
+          ))}
+        </div>
+        <button type="button" className="player-lock" aria-label={locked ? '解锁屏幕' : '锁定屏幕'}
+          aria-pressed={locked} onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => { setLocked((value) => !value); showGesture(locked ? '已解锁' : '屏幕已锁定'); }}>
+          {locked ? '🔓' : '🔒'}
+        </button>
+      </div>
+      {gesture && <div className="gesture-toast" role="status">{gesture}</div>}
       {state !== 'playing' && (
         <div className="player-overlay" role={state === 'error' ? 'alert' : 'status'}>
           {state === 'loading' ? (
@@ -243,6 +329,6 @@ export default function Player({ src, startAt = 0, autoPlay = true, retryKey = 0
           )}
         </div>
       )}
-    </>
+    </div>
   );
 }

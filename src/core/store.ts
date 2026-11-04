@@ -23,11 +23,17 @@ export interface Settings {
   timeoutMs: number;
   /** 观看历史是否记录 */
   recordHistory: boolean;
+  /** 主题：自动跟随系统、始终深色或浅色 */
+  theme: 'auto' | 'dark' | 'light';
+  /** 基础字体大小 */
+  fontSize: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   timeoutMs: 12000,
   recordHistory: true,
+  theme: 'auto',
+  fontSize: 15,
 };
 
 export async function loadJSON<T>(key: string, fallback: T): Promise<T> {

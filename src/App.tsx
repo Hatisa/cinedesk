@@ -8,13 +8,27 @@ import Play from './pages/Play';
 import Settings from './pages/Settings';
 import { addBackListener, consumeBack, exitApp, isNative } from './core';
 
+import { useApp } from './state/AppState';
+
 /** 详情页与播放页需要沉浸式全屏，不显示底部导航 */
 const IMMERSIVE = ['/detail/', '/play/'];
 
 export default function App() {
   const { pathname } = useLocation();
   const nav = useNavigate();
+  const { settings } = useApp();
   const immersive = IMMERSIVE.some((p) => pathname.startsWith(p));
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      document.documentElement.dataset.theme = settings.theme === 'auto' ? (media.matches ? 'dark' : 'light') : settings.theme;
+      document.documentElement.style.fontSize = `${settings.fontSize}px`;
+    };
+    apply();
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, [settings.theme, settings.fontSize]);
 
   /*
    * 安卓返回键接管。

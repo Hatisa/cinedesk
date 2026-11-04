@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import VodCard from '../components/VodCard';
+import PosterImage from '../components/PosterImage';
+import { useExpandable } from '../components/Expandable';
 import { useToast } from '../components/Toast';
-import { fetchById, findSavedVariant, getItem, matchesSavedWork, playPath, putItems, recommendFor, searchAll, type AggregatedItem, type HistoryEntry } from '../core';
+import { buildShareText, copyText, fetchById, findSavedVariant, getItem, matchesSavedWork, playPath, putItems, recommendFor, searchAll, type AggregatedItem, type HistoryEntry } from '../core';
 import { useApp } from '../state/AppState';
 
 export default function Detail() {
@@ -25,6 +27,9 @@ export default function Detail() {
   const [lineIdx, setLineIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [rec, setRec] = useState<{ key: string; items: AggregatedItem[] } | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const actors = useExpandable(key);
+  const synopsis = useExpandable(`${key}:${sourceIdx}`);
   const name = sp.get('name') || item?.name || decodeWorkName(key);
 
   useEffect(() => {
@@ -100,6 +105,25 @@ export default function Detail() {
     nav(playPath(item, selection), { state: { item, resumeAt: resume?.position ?? 0 } });
   };
 
+  const share = async () => {
+    setSharing(true);
+    const text = buildShareText({
+      name: item.name, score: item.score, year: current?.year ?? '', typeName: current?.typeName ?? '',
+      actors: (current?.actor ?? '').split(/[/,，、]/).filter(Boolean).slice(0, 5), keyword: item.name,
+    });
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: item.name, text });
+        toast('分享卡片已生成');
+      } else if (await copyText(text)) toast('影片卡片已复制，可粘贴分享');
+      else toast('暂时无法分享，请稍后重试');
+    } catch (error) {
+      if (error instanceof Error && error.name !== 'AbortError') {
+        if (await copyText(text)) toast('影片卡片已复制，可粘贴分享');
+      }
+    } finally { setSharing(false); }
+  };
+
   return (
     <div className="page page-plain">
       <div className="detail-topbar">
@@ -109,7 +133,7 @@ export default function Detail() {
       <div className="detail-hero">
         {item.pic && <div className="detail-bg" style={{ backgroundImage: `url("${item.pic}")` }} />}
         <div className="detail-top">
-          {item.pic ? <img className="detail-poster" src={item.pic} alt={item.name} referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : <div className="detail-poster poster-fallback">{item.name.slice(0, 3)}</div>}
+          {item.pic ? <PosterImage name={item.name} urls={[item.pic, ...item.variants.map((v) => v.pic)]} className="detail-poster" eager /> : <div className="detail-poster poster-fallback">{item.name.slice(0, 3)}</div>}
           <div className="detail-info">
             <h1 className="detail-name">{item.name}</h1>
             <div className="detail-tags">
@@ -121,7 +145,12 @@ export default function Detail() {
             </div>
             {current?.remarks && <div className="detail-line">{current.remarks}</div>}
             {current?.director && <div className="detail-line">导演：{current.director}</div>}
-            {current?.actor && <div className="detail-line">主演：{current.actor.slice(0, 100)}</div>}
+            {current?.actor && (
+              <div className={`detail-line expandable${actors.expanded ? ' expanded' : ''}`}>
+                <div className="expandable-text">主演：{current.actor}</div>
+                {current.actor.length > 40 && <button className="expand-toggle" onClick={actors.toggle}>{actors.expanded ? '收起' : '展开全部'}</button>}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -133,13 +162,14 @@ export default function Detail() {
           toggleFav(entry);
           toast(fav ? '已取消收藏' : '已加入收藏', fav ? { label: '撤销', onClick: () => restoreFavorites([entry]) } : undefined);
         }}><StarIcon filled={fav} />{fav ? '已收藏' : '收藏'}</button>
+        <button className="btn ghost" style={{ flex: '0 0 76px' }} disabled={sharing} onClick={() => void share()} aria-label="分享影片"><ShareIcon />分享</button>
       </div>
       <div className="group-title">播放来源</div>
       <div className="line-tabs">{item.variants.map((v, i) => <button key={`${v.sourceKey}:${v.vodId}`} className={`line-tab${i === sourceIdx ? ' active' : ''}`} aria-pressed={i === sourceIdx} onClick={() => { setSourceIdx(i); setLineIdx(0); }}>{v.lines.some((l) => l.direct) && <span className="dot" />}{v.sourceName}<span style={{ opacity: 0.6, marginLeft: 4 }}>{v.lines[0]?.episodes.length}集</span></button>)}</div>
       {current && current.lines.length > 1 && <><div className="group-title">同源线路</div><div className="line-tabs">{current.lines.map((l, i) => <button key={`${l.name}:${i}`} className={`line-tab${i === lineIdx ? ' active' : ''}`} aria-pressed={i === lineIdx} onClick={() => setLineIdx(i)}>{l.name} · {l.episodes.length}集</button>)}</div></>}
       <div className="group-title">选集</div>
       <div className="ep-grid">{line?.episodes.map((ep) => <button key={ep.index} className="ep-btn" onClick={() => startPlay(ep.index)}>{ep.name}</button>)}</div>
-      {current?.content && <><div className="section-head"><span className="section-title">剧情简介</span></div><div className="synopsis">{current.content}</div></>}
+      {current?.content && <><div className="section-head"><span className="section-title">剧情简介</span><button className="expand-toggle" onClick={synopsis.toggle}>{synopsis.expanded ? '收起' : '展开全部'}</button></div><div className={`synopsis${synopsis.expanded ? ' expanded' : ''}`}>{current.content}</div></>}
       {rec && rec.key === item.key && rec.items.length > 0 && <><div className="section-head"><span className="section-title">猜你喜欢</span><span className="section-more">同类型 · 同演员</span></div><div className="grid">{rec.items.map((r) => <VodCard key={r.key} item={r} showSources={false} onClick={() => { putItems([r]); nav(`/detail/${encodeURIComponent(r.key)}?name=${encodeURIComponent(r.name)}`, { state: { item: r } }); }} />)}</div></>}
     </div>
   );
@@ -154,3 +184,4 @@ function HomeIcon() { return <svg viewBox="0 0 24 24" width="19" height="19" ari
 function BackIcon() { return <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M15 19l-7-7 7-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
 function PlayIcon() { return <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 4l13 8-13 8z" fill="currentColor" /></svg>; }
 function StarIcon({ filled }: { filled: boolean }) { return <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 3l2.6 5.9 6.4.6-4.8 4.2 1.4 6.3L12 16.8 6.4 20l1.4-6.3L3 9.5l6.4-.6z" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>; }
+function ShareIcon() { return <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="18" cy="5" r="3" fill="none" stroke="currentColor" strokeWidth="1.8"/><circle cx="6" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.8"/><circle cx="18" cy="19" r="3" fill="none" stroke="currentColor" strokeWidth="1.8"/><path d="M8.6 10.5l6.8-4M8.6 13.5l6.8 4" stroke="currentColor" strokeWidth="1.8"/></svg>; }

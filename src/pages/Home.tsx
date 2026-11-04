@@ -9,17 +9,23 @@ import {
   TRENDING_TABS,
   expandCache,
   isFresh,
+  loadLatestUpdates,
   loadRecent,
   loadTrendingCache,
   putItems,
   pushRecent,
+  recommendFromSaved,
   refreshTrending,
   saveJSON,
   searchAll,
   EMPTY_SEARCH_FILTERS,
   filterSearchItems,
+  groupSeries,
+  isDerivative,
+  searchSuggestions,
   type SearchFilters,
   type AggregatedItem,
+  type HistoryEntry,
   type SourceStatus,
   type TrendingMap,
   type TrendingTab,
@@ -29,7 +35,7 @@ import { useApp } from '../state/AppState';
 export default function Home() {
   const nav = useNavigate();
   const toast = useToast();
-  const { sources, health, settings, persistHealth, ready, search, setSearch } = useApp();
+  const { sources, health, settings, history, favorites, persistHealth, ready, search, setSearch } = useApp();
 
   /*
    * 搜索状态从全局快照初始化：从详情页返回时组件会重新挂载，
@@ -42,7 +48,17 @@ export default function Home() {
   const [searched, setSearched] = useState(search !== null);
   const [totalMs, setTotalMs] = useState(search?.totalMs ?? 0);
   const [filters, setFilters] = useState<SearchFilters>(() => search?.filters ?? { ...EMPTY_SEARCH_FILTERS });
+  const [mainOnly, setMainOnly] = useState(true);
+  const [expandedSeries, setExpandedSeries] = useState<Set<string>>(new Set());
   const filteredItems = useMemo(() => filterSearchItems(items, filters), [items, filters]);
+  const displayItems = useMemo(() => mainOnly ? filteredItems.filter((item) => !isDerivative(item)) : filteredItems, [filteredItems, mainOnly]);
+  const searchEntries = useMemo(() => groupSeries(displayItems), [displayItems]);
+  const derivativeCount = filteredItems.length - displayItems.length;
+  const toggleSeries = (key: string) => setExpandedSeries((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
   const [recent, setRecent] = useState<string[]>([]);
   // 搜索历史持久化：此前只存在内存里，App 重启即失；现在落盘，重启后仍在
   useEffect(() => {
@@ -56,6 +72,27 @@ export default function Home() {
   }, []);
   const [trending, setTrending] = useState<TrendingMap>(FALLBACK_TRENDING);
   const [trendTab, setTrendTab] = useState<TrendingTab>('movie');
+  const [continueList, setContinueList] = useState<HistoryEntry[]>(history.slice(0, 5));
+  const [recommendItems, setRecommendItems] = useState<AggregatedItem[]>([]);
+  const [latestItems, setLatestItems] = useState<AggregatedItem[]>([]);
+  useEffect(() => {
+    setContinueList(history.slice(0, 5));
+    const latest = history[0] ?? (favorites[0] ? { key: favorites[0].key, sourceKey: favorites[0].sourceKey, vodId: favorites[0].vodId, name: favorites[0].name } : undefined);
+    if (!latest) return;
+    let alive = true;
+    void recommendFromSaved(latest, { sources, health, timeoutMs: settings.timeoutMs })
+      .then((items) => { if (alive && items.length) setRecommendItems(items); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [history, favorites, sources, health, settings.timeoutMs]);
+  useEffect(() => {
+    let alive = true;
+    const ctl = new AbortController();
+    void loadLatestUpdates({ sources, health, timeoutMs: settings.timeoutMs, signal: ctl.signal })
+      .then((items) => { if (alive && items.length) setLatestItems(items); })
+      .catch(() => undefined);
+    return () => { alive = false; ctl.abort(); };
+  }, [sources, health, settings.timeoutMs]);
   const inputRef = useRef<HTMLInputElement>(null);
   // 每次搜索递增，防止旧搜索的结果覆盖新搜索
   const seqRef = useRef(0);
@@ -203,7 +240,9 @@ export default function Home() {
   };
 
   const openDetail = (item: AggregatedItem) => {
-    setSearch({ keyword, items: itemsRef.current, statuses: statusesRef.current, totalMs, scrollY: scrollRef.current, savedAt: search?.savedAt, filters: filtersRef.current });
+    if (searched) {
+      setSearch({ keyword, items: itemsRef.current, statuses: statusesRef.current, totalMs, scrollY: scrollRef.current, savedAt: search?.savedAt, filters: filtersRef.current });
+    }
     nav(`/detail/${encodeURIComponent(item.key)}?name=${encodeURIComponent(item.name)}`, {
       state: { item },
     });
@@ -286,40 +325,49 @@ export default function Home() {
       </form>
 
       {!searched && (
-        <div className="trend-box">
-          <div className="trend-head">
-            <span className="trend-title">实时热搜</span>
-            <div className="trend-tabs">
-              {TRENDING_TABS.map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  className={`trend-tab${trendTab === t.key ? ' active' : ''}`}
-                  onClick={() => setTrendTab(t.key)}
-                >
-                  {t.label}
+        <>
+          <div className="trend-box">
+            <div className="trend-head">
+              <span className="trend-title">实时热搜</span>
+              <div className="trend-tabs">
+                {TRENDING_TABS.map((t) => (
+                  <button key={t.key} type="button" className={`trend-tab${trendTab === t.key ? ' active' : ''}`} onClick={() => setTrendTab(t.key)}>{t.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="trend-list">
+              {trending[trendTab].map((e, i) => (
+                <button key={e.title} type="button" className="trend-row" onClick={() => { setKeyword(e.title); void runSearch(e.title); }}>
+                  <span className={`trend-rank${i < 3 ? ' top' : ''}`}>{i + 1}</span>
+                  <span className="trend-name">{e.title}</span>
+                  {e.score > 0 && <span className="trend-score">{e.score.toFixed(1)}</span>}
                 </button>
               ))}
             </div>
           </div>
-          <div className="trend-list">
-            {trending[trendTab].map((e, i) => (
-              <button
-                key={e.title}
-                type="button"
-                className="trend-row"
-                onClick={() => {
-                  setKeyword(e.title);
-                  void runSearch(e.title);
-                }}
-              >
-                <span className={`trend-rank${i < 3 ? ' top' : ''}`}>{i + 1}</span>
-                <span className="trend-name">{e.title}</span>
-                {e.score > 0 && <span className="trend-score">{e.score.toFixed(1)}</span>}
-              </button>
-            ))}
-          </div>
-        </div>
+
+          {continueList.length > 0 && <section className="discover-section">
+            <div className="section-head"><span className="section-title">继续观看</span><button className="section-more" onClick={() => nav('/favorites')}>全部记录</button></div>
+            <div className="continue-row">{continueList.map((h) => {
+              const pct = h.duration > 0 ? Math.min(100, Math.round(h.position / h.duration * 100)) : 0;
+              return <button className="continue-card" key={`${h.key}:${h.sourceKey}:${h.vodId}`} onClick={() => nav(`/detail/${encodeURIComponent(h.key)}?name=${encodeURIComponent(h.name)}`, { state: { meta: { sourceKey: h.sourceKey, vodId: h.vodId } } })}>
+                <span className="continue-title">{h.name}</span>
+                <span className="continue-episode">{h.episodeName || `第${h.episodeIndex + 1}集`}{pct ? ` · ${pct}%` : ''}</span>
+                {pct > 0 && <span className="list-progress"><span className="list-progress-fill" style={{ width: `${pct}%` }} /></span>}
+              </button>;
+            })}</div>
+          </section>}
+
+          {recommendItems.length > 0 && <section className="discover-section">
+            <div className="section-head"><span className="section-title">为你推荐</span><span className="section-more">根据最近观看 · 仅本地</span></div>
+            <div className="grid">{recommendItems.slice(0, 6).map((item) => <VodCard key={item.key} item={item} showSources={false} onClick={() => openDetail(item)} />)}</div>
+          </section>}
+
+          {latestItems.length > 0 && <section className="discover-section">
+            <div className="section-head"><span className="section-title">最近更新</span><span className="section-more">来自优质源</span></div>
+            <div className="grid">{latestItems.slice(0, 12).map((item) => <VodCard key={item.key} item={item} onClick={() => openDetail(item)} />)}</div>
+          </section>}
+        </>
       )}
 
       {searched && recent.length > 1 && !searching && (
@@ -370,10 +418,30 @@ export default function Home() {
             <span className="section-more">多来源已合并</span>
           </div>
           <SearchFilterBar value={filters} onChange={changeFilters} filtered={filteredItems.length} total={items.length} />
-          {filteredItems.length > 0 ? (
-            <div className="grid search-result-grid">
-              {filteredItems.map((it) => (
-                <VodCard key={it.key} item={it} onClick={() => openDetail(it)} />
+          <div className="search-tools">
+            <label className="search-toggle">
+              <input type="checkbox" checked={mainOnly} onChange={(e) => setMainOnly(e.target.checked)} />
+              <span>仅显示正片{derivativeCount > 0 ? `（已收起 ${derivativeCount} 个解说/预告）` : ''}</span>
+            </label>
+            {!mainOnly && derivativeCount > 0 && <button type="button" className="row-action" onClick={() => setMainOnly(true)}>重新收起</button>}
+          </div>
+          {searchEntries.length > 0 ? (
+            <div className="search-results-stack">
+              {searchEntries.map((entry) => entry.kind === 'item' ? (
+                <VodCard key={entry.key} item={entry.item} onClick={() => openDetail(entry.item)} />
+              ) : (
+                <section key={entry.key} className="series-card">
+                  <button type="button" className="series-head" onClick={() => toggleSeries(entry.key)} aria-expanded={expandedSeries.has(entry.key)}>
+                    <span className="series-title">{entry.name}（系列）</span>
+                    <span className="series-count">{entry.items.length} 个版本</span>
+                    <span className="filter-chevron">⌄</span>
+                  </button>
+                  <div className={`series-body${expandedSeries.has(entry.key) ? ' open' : ''}`}>
+                    <div className="grid">
+                      {entry.items.map((it) => <VodCard key={it.key} item={it} onClick={() => openDetail(it)} />)}
+                    </div>
+                  </div>
+                </section>
               ))}
             </div>
           ) : (
@@ -399,11 +467,17 @@ export default function Home() {
         <div className="empty">
           <div className="empty-icon">🔍</div>
           <div>没有找到「{keyword}」</div>
-          <div className="hint">
-            换个片名试试，或在「设置」里检查资源源状态
-            <br />
-            部分源可能临时不可用，多源搜索会自动跳过
-          </div>
+          <div className="hint">换个片名试试，或在「设置」里检查资源源状态；部分源可能临时不可用，多源搜索会自动跳过。</div>
+          {searchSuggestions(keyword, recent, trending[trendTab].map((e) => e.title)).length > 0 && (
+            <div className="suggest-box">
+              <div className="group-title">试试这些</div>
+              <div className="chip-row">
+                {searchSuggestions(keyword, recent, trending[trendTab].map((e) => e.title)).map((s) => (
+                  <button key={s} type="button" className="chip" onClick={() => { setKeyword(s); void runSearch(s); }}>{s}</button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

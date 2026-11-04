@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import Modal from '../components/Modal';
 import { useToast } from '../components/Toast';
-import { buildApiUrl, httpGetJson, probeSources, type SourceConfig, type SourceStatus } from '../core';
+import { buildApiUrl, httpGetJson, probeSources, sortByHealth, type SourceConfig, type SourceStatus } from '../core';
 import { useApp } from '../state/AppState';
 
 /** 从接口地址推导一个稳定的源标识 */
@@ -38,8 +38,17 @@ export default function Settings() {
   const [form, setForm] = useState({ name: '', api: '' });
   /** 添加中的协议预检，防止重复提交 */
   const [adding, setAdding] = useState(false);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
+  const [sourceQuery, setSourceQuery] = useState('');
 
   const enabledCount = sources.filter((s) => s.enabled).length;
+  const visibleSources = sortByHealth(sources, health).filter((s) => {
+    if (sourceFilter === 'enabled' && !s.enabled) return false;
+    if (sourceFilter === 'disabled' && s.enabled) return false;
+    const query = sourceQuery.trim().toLowerCase();
+    return !query || s.name.toLowerCase().includes(query) || s.api.toLowerCase().includes(query);
+  });
 
   const runProbe = async () => {
     setProbing(true);
@@ -120,18 +129,26 @@ export default function Settings() {
         <h1 className="page-title">设置</h1>
       </div>
 
-      <div className="group-title">资源源（{enabledCount}/{sources.length} 启用）</div>
-      <div className="btn-row" style={{ marginBottom: 10 }}>
-        <button className="btn" onClick={() => void runProbe()} disabled={probing || !ready}>
-          {probing ? '测速中…' : '全部测速'}
-        </button>
-        <button className="btn" onClick={() => setShowAdd(true)}>
-          添加源
-        </button>
-      </div>
-
-      <div className="list" style={{ marginBottom: 18 }}>
-        {sources.map((s) => {
+      <button className="source-summary" onClick={() => setSourcesOpen((v) => !v)} aria-expanded={sourcesOpen}>
+        <span>资源源（{enabledCount}/{sources.length} 启用）</span>
+        <span className="filter-chevron">{sourcesOpen ? '⌃' : '⌄'}</span>
+      </button>
+      {sourcesOpen && <>
+        <div className="btn-row" style={{ marginBottom: 10 }}>
+          <button className="btn" onClick={() => void runProbe()} disabled={probing || !ready}>
+            {probing ? '测速中…' : '全部测速'}
+          </button>
+          <button className="btn" onClick={() => setShowAdd(true)}>添加源</button>
+        </div>
+        <div className="source-tools">
+          <input value={sourceQuery} onChange={(e) => setSourceQuery(e.target.value)} placeholder="搜索源名称或地址" aria-label="搜索资源源" />
+          <div className="line-tabs">
+            {([['all', '全部'], ['enabled', '已启用'], ['disabled', '已停用']] as const).map(([key, label]) => <button key={key} className={`line-tab${sourceFilter === key ? ' active' : ''}`} onClick={() => setSourceFilter(key)}>{label}</button>)}
+          </div>
+          <div className="hint">按健康度排序，响应快且稳定的源优先。</div>
+        </div>
+        <div className="list" style={{ marginBottom: 18 }}>
+        {visibleSources.map((s) => {
           const rec = health.get(s.key);
           const probe = probeResult[s.key];
           const dot = probe
@@ -186,9 +203,25 @@ export default function Settings() {
             </div>
           );
         })}
+        {visibleSources.length === 0 && <div className="empty">没有符合条件的资源源</div>}
       </div>
+      </>}
 
-      <div className="group-title">搜索与播放</div>
+      <div className="group-title">外观</div>
+      <div className="group">
+        <div className="setting-row">
+          <div className="setting-label"><div className="t"><label htmlFor="app-theme">主题</label></div><div className="d">自动模式跟随系统深浅色</div></div>
+          <select id="app-theme" className="setting-select" value={settings.theme} onChange={(e) => setSettings({ theme: e.target.value as 'auto' | 'dark' | 'light' })}>
+            <option value="auto">跟随系统</option><option value="dark">深色</option><option value="light">浅色</option>
+          </select>
+        </div>
+        <div className="setting-row">
+          <div className="setting-label"><div className="t"><label htmlFor="app-font-size">字体大小</label></div><div className="d">立即应用到所有页面</div></div>
+          <select id="app-font-size" className="setting-select" value={settings.fontSize} onChange={(e) => setSettings({ fontSize: Number(e.target.value) })}>
+            <option value={14}>小</option><option value={15}>标准</option><option value={17}>大</option><option value={19}>特大</option>
+          </select>
+        </div>
+      </div>
       <div className="group">
         <div className="setting-row">
           <div className="setting-label">
