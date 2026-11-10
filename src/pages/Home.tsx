@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import VodCard from '../components/VodCard';
 import PosterImage from '../components/PosterImage';
 import SearchFilterBar from '../components/SearchFilterBar';
@@ -26,6 +26,8 @@ import {
   groupSeries,
   isDerivative,
   searchSuggestions,
+  onBack,
+  onTabReset,
   type SearchFilters,
   type AggregatedItem,
   type HistoryEntry,
@@ -35,6 +37,9 @@ import {
 } from '../core';
 import { useApp } from '../state/AppState';
 
+/** 发现页（未搜索）的滚动位置，返回首页时用来还原浏览位置 */
+const HOME_SCROLL_KEY = 'cinedesk:home-scroll';
+
 const SORT_OPTIONS: { key: 'default' | 'score' | 'year'; label: string }[] = [
   { key: 'default', label: '综合' },
   { key: 'score', label: '评分' },
@@ -43,6 +48,7 @@ const SORT_OPTIONS: { key: 'default' | 'score' | 'year'; label: string }[] = [
 
 export default function Home() {
   const nav = useNavigate();
+  const location = useLocation();
   const toast = useToast();
   const { sources, health, settings, history, favorites, persistHealth, ready, search, setSearch } = useApp();
 
@@ -130,11 +136,41 @@ export default function Home() {
   statusesRef.current = statuses;
   filtersRef.current = filters;
   useEffect(() => {
-    const savePosition = () => { scrollRef.current = window.scrollY; };
+    const savePosition = () => {
+      scrollRef.current = window.scrollY;
+      // 发现页也记住滚动位置：从详情页返回时不该被弹回顶部
+      try { sessionStorage.setItem(HOME_SCROLL_KEY, String(window.scrollY)); } catch { /* 无痕模式忽略 */ }
+    };
     window.addEventListener('scroll', savePosition, { passive: true });
     return () => window.removeEventListener('scroll', savePosition);
   }, []);
-  useEffect(() => () => abortRef.current?.abort(), []);
+
+  // 未搜索时重新挂载，恢复上次的浏览位置（搜索态由快照里的 scrollY 负责）
+  const searchedRef = useRef(searched);
+  searchedRef.current = searched;
+  useEffect(() => {
+    if (searchedRef.current) return;
+    let y = 0;
+    try { y = Number(sessionStorage.getItem(HOME_SCROLL_KEY)) || 0; } catch { y = 0; }
+    if (y <= 0) return;
+    const frame = requestAnimationFrame(() => window.scrollTo({ top: y, behavior: 'instant' }));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  /*
+   * 卸载时中止进行中的搜索。
+   *
+   * 注意 aliveRef：StrictMode 在挂载后会「卸载 → 再挂载」模拟一次，卸载清理会
+   * abort 掉此时已经发出的请求。把「是否还活着」单独记下来，并且只 abort
+   * 真正在跑的那一次，避免挂载期间发起的搜索被这次假卸载误杀。
+   */
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      abortRef.current?.abort();
+    };
+  }, []);
 
   /*
    * 热搜榜：先用缓存立刻渲染，再后台刷新。
@@ -238,8 +274,52 @@ export default function Home() {
     [sources, health, settings.timeoutMs, persistHealth, toast, activeCount, ready, setSearch],
   );
 
+  /*
+   * 退出搜索，回到首页发现页（热搜 / 继续观看 / 推荐 / 最近更新）。
+   *
+   * 之前搜过一次这个页面就再也回不去了：清空输入框只会把文字删掉，
+   * 结果区依旧显示；安卓返回键更是直接退出 App。主流 App 的搜索页都有明确的
+   * 「返回首页」出口，这里补上，并把搜索相关的临时状态一起复位。
+   */
+  const exitSearch = useCallback(() => {
+    seqRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setSearching(false);
+    setSearched(false);
+    setKeyword('');
+    setItems([]);
+    setStatuses([]);
+    setTotalMs(0);
+    setFilters({ ...EMPTY_SEARCH_FILTERS });
+    setSort('default');
+    setExpandedSeries(new Set());
+    setSearch(null);
+    inputRef.current?.blur();
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [setSearch]);
+
+  // 安卓返回键：搜索态先回到发现页，再按一次才轮到 App 退出
+  useEffect(() => onBack(() => {
+    if (!searched && !searching) return false;
+    exitSearch();
+    return true;
+  }), [searched, searching, exitSearch]);
+
+  // 再次点击底部「搜索」标签：主流 App 的约定是回到该页顶层
+  useEffect(() => onTabReset((path) => {
+    if (path === '/' && (searched || searching)) exitSearch();
+  }), [searched, searching, exitSearch]);
+
+  /*
+   * 从详情页「重新搜索」或播放页「返回搜索」跳过来时，地址上带着 ?q=。
+   * 之前读的是 window.location.search —— HashRouter 下它永远是空的，
+   * 于是这些入口只会回到首页、并不会真的搜。改用路由的 location。
+   */
+  const deepLinkQuery = new URLSearchParams(location.search).get('q')?.trim() ?? '';
+
   useEffect(() => {
-    if (!ready || !search) return;
+    if (!ready || !search || deepLinkQuery) return;
     setKeyword(search.keyword);
     setItems(search.items);
     setStatuses(search.statuses);
@@ -248,15 +328,29 @@ export default function Home() {
     setSearched(true);
     const frame = requestAnimationFrame(() => window.scrollTo({ top: search.scrollY ?? 0, behavior: 'instant' }));
     return () => cancelAnimationFrame(frame);
-  }, [ready]);
+  }, [ready, deepLinkQuery]);
 
+  const deepLinkDone = useRef('');
   useEffect(() => {
-    const query = new URLSearchParams(location.search).get('q');
-    if (ready && query) {
-      setKeyword(query);
-      void runSearch(query);
-    }
-  }, [ready]);
+    if (!ready || !deepLinkQuery || deepLinkDone.current === deepLinkQuery) return;
+    deepLinkDone.current = deepLinkQuery;
+    const q = deepLinkQuery;
+    // 消费掉 ?q=，否则从详情页返回时会被当成新的一次深链再搜一遍
+    nav('/', { replace: true });
+    /*
+     * 延后到微任务里再发起搜索。StrictMode 会在挂载后立刻模拟一次卸载，
+     * 卸载清理会 abort 掉「当前进行中的请求」；同步发起的话，刚创建的
+     * AbortController 会被这次假卸载掐断，表现为点了「重新搜索」却
+     * 0 个源、几毫秒就结束。等这一轮清理跑完再发请求就不会被误杀。
+     */
+    queueMicrotask(() => {
+      if (!aliveRef.current) return;
+      // 深链优先：先清掉旧快照，避免闪一下上一次的搜索结果
+      setSearch(null);
+      setKeyword(q);
+      void runSearch(q);
+    });
+  }, [ready, deepLinkQuery, runSearch, nav]);
 
   const changeFilters = (next: SearchFilters) => {
     setFilters(next);
@@ -291,6 +385,14 @@ export default function Home() {
           void runSearch(keyword);
         }}
       >
+        {/* 搜索结果页要有明确的「回首页」出口，否则搜一次就再也看不到热搜与推荐 */}
+        {(searched || searching) && (
+          <button type="button" className="search-back" onClick={exitSearch} aria-label="返回首页">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
         <div className="search-bar">
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <path
@@ -316,10 +418,15 @@ export default function Home() {
               type="button"
               className="search-clear"
               onClick={() => {
+                // 结果页上清空输入框 = 结束这次搜索，回到首页；只删文字会留下一屏和输入框无关的结果
+                if (searched || searching) {
+                  exitSearch();
+                  return;
+                }
                 setKeyword('');
                 inputRef.current?.focus();
               }}
-              aria-label="清空"
+              aria-label={searched || searching ? '返回首页' : '清空'}
             >
               ×
             </button>
@@ -541,6 +648,7 @@ export default function Home() {
           <div className="empty-icon">🔍</div>
           <div>没有找到「{keyword}」</div>
           <div className="hint">换个片名试试，或在「设置」里检查资源源状态；部分源可能临时不可用，多源搜索会自动跳过。</div>
+          <button className="btn" style={{ maxWidth: 200 }} onClick={exitSearch}>返回首页</button>
           {searchSuggestions(keyword, recent, trending[trendTab].map((e) => e.title)).length > 0 && (
             <div className="suggest-box">
               <div className="group-title">试试这些</div>

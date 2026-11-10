@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast';
 import {
   failureKey,
   fetchById,
+  goBackOr,
   getItem,
   matchesSavedWork,
   moveSelection,
@@ -39,6 +40,9 @@ export default function Play() {
   failedRef.current = failed;
   selectionRef.current = selection;
   const name = sp.get('name') || item?.name || key.split('~')[0];
+
+  // 返回兜底：没有历史可退时回到详情页（换源、选集都在那里），而不是闪回首页
+  const goBack = () => goBackOr(nav, item ? `/detail/${encodeURIComponent(item.key)}?name=${encodeURIComponent(item.name)}` : '/');
 
   // 冷启动：先按 source+vod 回源，再按片名搜索；没有条目时也提供返回出口。
   useEffect(() => {
@@ -149,7 +153,7 @@ export default function Play() {
   if (!item) {
     return (
       <div className="player-page">
-        <PlayerBar title={name || '播放'} onBack={() => nav(-1)} />
+        <PlayerBar title={name || '播放'} onBack={() => goBack()} />
         <div className="empty" style={{ margin: 'auto' }}>
           {notFound ? (
             <>
@@ -162,7 +166,7 @@ export default function Play() {
             <>
               <div className="spinner" style={{ margin: '0 auto 12px' }} />
               <div>正在获取播放地址…</div>
-              <button className="btn" style={{ maxWidth: 180, margin: '12px auto 0' }} onClick={() => nav(-1)}>取消并返回</button>
+              <button className="btn" style={{ maxWidth: 180, margin: '12px auto 0' }} onClick={() => goBack()}>取消并返回</button>
             </>
           )}
         </div>
@@ -173,7 +177,7 @@ export default function Play() {
   if (!episode) {
     return (
       <div className="player-page">
-        <PlayerBar title={item.name} onBack={() => nav(-1)} />
+        <PlayerBar title={item.name} onBack={() => goBack()} />
         <div className="empty" style={{ margin: 'auto' }}>
           <div className="empty-icon">🎞️</div><div>该来源没有可直接播放的地址</div>
           <button className="btn primary" style={{ maxWidth: 220 }} onClick={() => nav(`/detail/${encodeURIComponent(item.key)}?name=${encodeURIComponent(item.name)}`, { state: { item } })}>返回详情切换来源</button>
@@ -185,7 +189,7 @@ export default function Play() {
   return (
     <div className="player-page">
       <div className="player-bar">
-        <button className="icon-btn" onClick={() => nav(-1)} aria-label="返回"><BackIcon /></button>
+        <button className="icon-btn" onClick={() => goBack()} aria-label="返回"><BackIcon /></button>
         <div className="player-title">{item.name} · {episode.name}</div>
         <button className="icon-btn" onClick={() => setShowLines((v) => !v)} aria-label="切换来源" aria-expanded={showLines}><SwitchIcon /></button>
       </div>

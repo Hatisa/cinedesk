@@ -4,7 +4,7 @@ import VodCard from '../components/VodCard';
 import PosterImage from '../components/PosterImage';
 import { useExpandable } from '../components/Expandable';
 import { useToast } from '../components/Toast';
-import { buildShareText, copyText, fetchById, findSavedVariant, getItem, matchesSavedWork, playPath, putItems, recommendFor, searchAll, type AggregatedItem, type HistoryEntry } from '../core';
+import { buildShareText, copyText, fetchById, findSavedVariant, getItem, goBackOr, matchesSavedWork, playPath, putItems, recommendFor, searchAll, type AggregatedItem, type HistoryEntry } from '../core';
 import { useApp } from '../state/AppState';
 
 export default function Detail() {
@@ -99,7 +99,7 @@ export default function Detail() {
    */
   if (loading) return (
     <div className="page page-plain">
-      <div className="detail-topbar"><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav(-1)} aria-label="返回"><BackIcon /></button><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={goHome} aria-label="回到首页"><HomeIcon /></button></div>
+      <div className="detail-topbar"><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => goBackOr(nav)} aria-label="返回"><BackIcon /></button><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={goHome} aria-label="回到首页"><HomeIcon /></button></div>
       <div className="skeleton-hero" aria-hidden="true">
         <div className="skeleton skeleton-poster" />
         <div className="skeleton-lines">
@@ -112,12 +112,12 @@ export default function Detail() {
       <div className="skeleton skeleton-line" style={{ height: 46, marginBottom: 18 }} aria-hidden="true" />
       <div className="skeleton skeleton-line" style={{ width: 84 }} aria-hidden="true" />
       <div className="skeleton-grid" aria-hidden="true">{Array.from({ length: 12 }).map((_, i) => <div className="skeleton skeleton-cell" key={i} />)}</div>
-      <div className="empty" role="status"><div>正在获取线路…</div><button className="btn" style={{ maxWidth: 180, margin: '12px auto 0' }} onClick={() => nav(-1)}>取消并返回</button></div>
+      <div className="empty" role="status"><div>正在获取线路…</div><button className="btn" style={{ maxWidth: 180, margin: '12px auto 0' }} onClick={() => goBackOr(nav)}>取消并返回</button></div>
     </div>
   );
   if (!item) return (
     <div className="page page-plain">
-      <div className="detail-topbar"><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav(-1)} aria-label="返回"><BackIcon /></button><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={goHome} aria-label="回到首页"><HomeIcon /></button></div>
+      <div className="detail-topbar"><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => goBackOr(nav)} aria-label="返回"><BackIcon /></button><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={goHome} aria-label="回到首页"><HomeIcon /></button></div>
       <div className="empty"><div className="empty-icon">📭</div><div>未找到该影片</div><div className="hint">可能来源已失效，请返回重新搜索</div><button className="btn primary" style={{ maxWidth: 220 }} onClick={() => nav(`/?q=${encodeURIComponent(name)}`)}>重新搜索</button></div>
     </div>
   );
@@ -150,7 +150,7 @@ export default function Detail() {
   return (
     <div className="page page-plain">
       <div className="detail-topbar">
-        <button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav(-1)} aria-label="返回"><BackIcon /></button>
+        <button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => goBackOr(nav)} aria-label="返回"><BackIcon /></button>
         <button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={goHome} aria-label="回到首页"><HomeIcon /></button>
       </div>
       <div className="detail-hero">

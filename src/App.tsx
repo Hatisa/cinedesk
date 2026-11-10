@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import BottomNav from './components/BottomNav';
 import Detail from './pages/Detail';
@@ -7,6 +7,7 @@ import Home from './pages/Home';
 import Play from './pages/Play';
 import Settings from './pages/Settings';
 import { addBackListener, consumeBack, exitApp, isNative } from './core';
+import { useToast } from './components/Toast';
 
 import { useApp } from './state/AppState';
 
@@ -17,6 +18,8 @@ export default function App() {
   const { pathname } = useLocation();
   const nav = useNavigate();
   const { settings } = useApp();
+  const toast = useToast();
+  const lastBackAt = useRef(0);
   const immersive = IMMERSIVE.some((p) => pathname.startsWith(p));
 
   useEffect(() => {
@@ -56,10 +59,29 @@ export default function App() {
         return;
       }
 
-      // 3) 已在首页，没有可回退的页面，此时才交给系统退出
+      /*
+       * 3) 没有历史但不在首页：说明是从深链/系统恢复直接进到了二级页，
+       *    此时回首页，而不是把 App 关掉。
+       */
+      if (pathname !== '/') {
+        nav('/', { replace: true });
+        return;
+      }
+
+      /*
+       * 4) 已经在首页：主流安卓 App 都是「再按一次才退出」，
+       *    防止用户在列表底部误触返回键直接把 App 关掉。
+       */
+      const now = Date.now();
+      if (now - lastBackAt.current > 2000) {
+        lastBackAt.current = now;
+        toast('再按一次返回键退出');
+        return;
+      }
+
       exitApp();
     });
-  }, [nav]);
+  }, [nav, pathname]);
 
   return (
     <div className="app">

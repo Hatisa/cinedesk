@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import PosterImage from '../components/PosterImage';
 import { useApp } from '../state/AppState';
 import { useToast } from '../components/Toast';
-import { fetchById, formatWatchTime, latestWatchProgress, watchProgress, type FavoriteEntry, type HistoryEntry } from '../core';
+import { fetchById, formatWatchTime, latestWatchProgress, onBack, onTabReset, watchProgress, type FavoriteEntry, type HistoryEntry } from '../core';
 
 type SavedEntry = FavoriteEntry | HistoryEntry;
 const keyOf = (entry: Pick<SavedEntry, 'key' | 'sourceKey' | 'vodId'>) => `${entry.key}:${entry.sourceKey}:${entry.vodId}`;
@@ -17,6 +17,22 @@ export default function Favorites() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [updates, setUpdates] = useState<Record<string, string>>({});
   const updateCount = Object.keys(updates).length;
+
+  // 批量管理态下按返回键先退出选择，而不是直接离开「我的」页
+  useEffect(() => onBack(() => {
+    if (!selecting) return false;
+    setSelecting(false);
+    setSelected(new Set());
+    return true;
+  }), [selecting]);
+
+  // 再次点击「我的」标签：退出批量管理，回到列表顶部
+  useEffect(() => onTabReset((path) => {
+    if (path === '/favorites' && selecting) {
+      setSelecting(false);
+      setSelected(new Set());
+    }
+  }), [selecting]);
 
   // 回源核对最近 5 个收藏的更新备注。后台静默进行，失败不打扰用户。
   useEffect(() => {

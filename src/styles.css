@@ -1915,3 +1915,34 @@ img {
 
 /* 收藏/观看记录的顶部切换 tab（实测 35px，补到 40px 便于点按） */
 .line-tab { min-height: 40px; display: inline-flex; align-items: center; }
+
+/* 搜索结果页的「回首页」按钮（搜索栏左侧，46px 高与搜索框齐平） */
+.search-back {
+  flex: 0 0 auto;
+  width: 42px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  margin-right: 6px;
+  border-radius: var(--radius);
+  color: var(--text-soft);
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+
+.search-back:active {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+
+.search-row .search-bar { flex: 1; min-width: 0; }
+
+/*
+ * 圆形图标按钮（详情页返回/回首页、播放页返回）视觉仍是 36px，
+ * 但把热区扩到 44px —— 这几个是高频操作，36px 在手机上经常点空。
+ * 用 ::after 扩热区不改变排版，也不会让按钮看起来变大。
+ */
+.icon-btn { position: relative; }
+.icon-btn::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; }
+
+/* 「仅显示正片」整行只有 21px 高：补上下内边距撑开热区，再用负外边距抵消对排版的影响 */
+.search-toggle { padding-block: 8px; margin-block: -8px; }

@@ -1,4 +1,5 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
+import { emitTabReset } from '../core';
 
 const TABS = [
   { to: '/', label: '搜索', icon: 'M21 21l-4.35-4.35M11 19a8 8 0 110-16 8 8 0 010 16z' },
@@ -15,6 +16,9 @@ const TABS = [
 ];
 
 export default function BottomNav() {
+  const { pathname } = useLocation();
+  const isActive = (to: string) => (to === '/' ? pathname === '/' : pathname.startsWith(to));
+
   return (
     <nav className="bottom-nav">
       {TABS.map((t) => (
@@ -22,7 +26,18 @@ export default function BottomNav() {
           key={t.to}
           to={t.to}
           end={t.to === '/'}
-          className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+          className={({ isActive: active }) => `nav-item${active ? ' active' : ''}`}
+          onClick={(e) => {
+            /*
+             * 再次点击当前标签：主流 App 都不重新导航，而是回到该页顶层
+             * （首页=退出搜索回到发现页，列表=回到顶部）。否则用户搜完一次，
+             * 点「搜索」标签毫无反应，只能杀掉 App。
+             */
+            if (!isActive(t.to)) return;
+            e.preventDefault();
+            emitTabReset(t.to);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
         >
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
             <path
