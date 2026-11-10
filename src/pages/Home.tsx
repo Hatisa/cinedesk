@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import VodCard from '../components/VodCard';
+import PosterImage from '../components/PosterImage';
 import SearchFilterBar from '../components/SearchFilterBar';
 import { useToast } from '../components/Toast';
 import {
@@ -16,6 +17,7 @@ import {
   pushRecent,
   recommendFromSaved,
   refreshTrending,
+  formatWatchTime,
   saveJSON,
   searchAll,
   watchProgress,
@@ -32,6 +34,12 @@ import {
   type TrendingTab,
 } from '../core';
 import { useApp } from '../state/AppState';
+
+const SORT_OPTIONS: { key: 'default' | 'score' | 'year'; label: string }[] = [
+  { key: 'default', label: '综合' },
+  { key: 'score', label: '评分' },
+  { key: 'year', label: '最新' },
+];
 
 export default function Home() {
   const nav = useNavigate();
@@ -53,7 +61,23 @@ export default function Home() {
   const [expandedSeries, setExpandedSeries] = useState<Set<string>>(new Set());
   const filteredItems = useMemo(() => filterSearchItems(items, filters), [items, filters]);
   const displayItems = useMemo(() => mainOnly ? filteredItems.filter((item) => !isDerivative(item)) : filteredItems, [filteredItems, mainOnly]);
-  const searchEntries = useMemo(() => groupSeries(displayItems), [displayItems]);
+  /*
+   * 多源合并后的顺序由「哪个源先返回」决定，不是用户想看的相关性。
+   * 主流视频 App 都提供「综合 / 评分 / 最新」排序，这里在前端做同样的事，不额外发请求。
+   */
+  const [sort, setSort] = useState<'default' | 'score' | 'year'>('default');
+  const sortedItems = useMemo(() => {
+    if (sort === 'default') return displayItems;
+    const weight = (item: AggregatedItem) => sort === 'score' ? item.score : Number(item.year) || 0;
+    // 片名命中的作品始终排在前面：搜「沙丘」时不希望纪录片《佐杜洛夫斯基的沙丘》因为分高而顶掉正片
+    const query = keyword.trim();
+    const hit = (item: AggregatedItem) => (query && item.name.includes(query) ? 0 : 1);
+    return [...displayItems]
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => hit(a.item) - hit(b.item) || weight(b.item) - weight(a.item) || a.index - b.index)
+      .map((entry) => entry.item);
+  }, [displayItems, sort, keyword]);
+  const searchEntries = useMemo(() => groupSeries(sortedItems), [sortedItems]);
   const derivativeCount = filteredItems.length - displayItems.length;
   const toggleSeries = (key: string) => setExpandedSeries((prev) => {
     const next = new Set(prev);
@@ -325,6 +349,36 @@ export default function Home() {
         )}
       </form>
 
+      {!searched && Array.isArray(recent) && recent.length > 0 && (
+        <div className="recent-row">
+          <div className="chip-row">
+            {recent.slice(0, 8).map((k) => (
+              <button
+                key={k}
+                type="button"
+                className="chip"
+                onClick={() => {
+                  setKeyword(k);
+                  void runSearch(k);
+                }}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="row-action"
+            onClick={() => {
+              setRecent([]);
+              void saveJSON(KEYS.recent, []);
+            }}
+          >
+            清除
+          </button>
+        </div>
+      )}
+
       {!searched && (
         <>
           <div className="trend-box">
@@ -352,10 +406,15 @@ export default function Home() {
             <div className="continue-row">{continueList.map((h) => {
               const progress = watchProgress(h);
               return <button className="continue-card" key={`${h.key}:${h.sourceKey}:${h.vodId}`} onClick={() => nav(`/detail/${encodeURIComponent(h.key)}?name=${encodeURIComponent(h.name)}`, { state: { meta: { sourceKey: h.sourceKey, vodId: h.vodId } } })}>
+                <span className="continue-thumb">
+                  {h.pic
+                    ? <PosterImage name={h.name} urls={[h.pic]} />
+                    : <span className="poster-fallback">{h.name.slice(0, 2)}</span>}
+                  <span className="continue-badge">{h.episodeName || `第${h.episodeIndex + 1}集`}</span>
+                  {progress.percent !== null && <span className="list-progress" aria-hidden="true"><span className="list-progress-fill" style={{ width: `${progress.percent}%` }} /></span>}
+                </span>
                 <span className="continue-title">{h.name}</span>
-                <span className="continue-episode">{h.episodeName || `第${h.episodeIndex + 1}集`}</span>
-                <span className="continue-progress">{progress.summary}</span>
-                {progress.percent !== null && <span className="list-progress"><span className="list-progress-fill" style={{ width: `${progress.percent}%` }} /></span>}
+                <span className="continue-episode">{progress.duration > 0 ? `剩余 ${formatWatchTime(Math.max(0, progress.duration - progress.position))}` : progress.summary}</span>
               </button>;
             })}</div>
           </section>}
@@ -419,6 +478,15 @@ export default function Home() {
             <span className="section-title">搜索结果</span>
             <span className="section-more">多来源已合并</span>
           </div>
+          <div className="sort-row">
+            <span className="sort-label">排序</span>
+            <div className="sort-seg" role="group" aria-label="结果排序">
+              {SORT_OPTIONS.map((o) => (
+                <button key={o.key} type="button" className={sort === o.key ? 'active' : ''}
+                  aria-pressed={sort === o.key} onClick={() => setSort(o.key)}>{o.label}</button>
+              ))}
+            </div>
+          </div>
           <SearchFilterBar value={filters} onChange={changeFilters} filtered={filteredItems.length} total={items.length} />
           <div className="search-tools">
             <label className="search-toggle">
@@ -432,18 +500,21 @@ export default function Home() {
               {searchEntries.map((entry) => entry.kind === 'item' ? (
                 <VodCard key={entry.key} item={entry.item} onClick={() => openDetail(entry.item)} />
               ) : (
-                <section key={entry.key} className="series-card">
-                  <button type="button" className="series-head" onClick={() => toggleSeries(entry.key)} aria-expanded={expandedSeries.has(entry.key)}>
-                    <span className="series-title">{entry.name}（系列）</span>
-                    <span className="series-count">{entry.items.length} 个版本</span>
-                    <span className="filter-chevron">⌄</span>
-                  </button>
-                  <div className={`series-body${expandedSeries.has(entry.key) ? ' open' : ''}`}>
-                    <div className="grid">
-                      {entry.items.map((it) => <VodCard key={it.key} item={it} onClick={() => openDetail(it)} />)}
+                <div className="series-result" key={entry.key}>
+                  <VodCard item={entry.items[0]} onClick={() => openDetail(entry.items[0])} />
+                  <section className="series-card">
+                    <button type="button" className="series-head" onClick={() => toggleSeries(entry.key)} aria-expanded={expandedSeries.has(entry.key)}>
+                      <span className="series-title">其他季 / 版本</span>
+                      <span className="series-count">{entry.items.length - 1} 部</span>
+                      <span className="filter-chevron">⌄</span>
+                    </button>
+                    <div className={`series-body${expandedSeries.has(entry.key) ? ' open' : ''}`}>
+                      <div className="grid">
+                        {entry.items.slice(1).map((it) => <VodCard key={it.key} item={it} onClick={() => openDetail(it)} />)}
+                      </div>
                     </div>
-                  </div>
-                </section>
+                  </section>
+                </div>
               ))}
             </div>
           ) : (

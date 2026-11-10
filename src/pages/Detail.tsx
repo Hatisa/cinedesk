@@ -28,6 +28,8 @@ export default function Detail() {
   const [loading, setLoading] = useState(false);
   const [rec, setRec] = useState<{ key: string; items: AggregatedItem[] } | null>(null);
   const [sharing, setSharing] = useState(false);
+  // 长剧默认正序；倒序是「刚更新到第 40 集」时最常用的看法
+  const [desc, setDesc] = useState(false);
   const actors = useExpandable(key);
   const synopsis = useExpandable(`${key}:${sourceIdx}`);
   const name = sp.get('name') || item?.name || decodeWorkName(key);
@@ -91,7 +93,28 @@ export default function Detail() {
     return () => ctl.abort();
   }, [item, sources, settings.timeoutMs]);
 
-  if (loading) return <div className="page page-plain"><div className="empty"><div className="spinner" style={{ margin: '0 auto 12px' }} /><div>正在获取线路…</div><button className="btn" style={{ maxWidth: 180, margin: '16px auto' }} onClick={() => nav(-1)}>取消并返回</button></div></div>;
+  /*
+   * 冷启动要从资源站回源，通常要 1-3 秒。原来只有一个转圈，
+   * 换成和真实详情页同构的骨架屏，等待时页面不再「跳版」。
+   */
+  if (loading) return (
+    <div className="page page-plain">
+      <div className="detail-topbar"><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav(-1)} aria-label="返回"><BackIcon /></button><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={goHome} aria-label="回到首页"><HomeIcon /></button></div>
+      <div className="skeleton-hero" aria-hidden="true">
+        <div className="skeleton skeleton-poster" />
+        <div className="skeleton-lines">
+          <div className="skeleton skeleton-line" style={{ width: '72%', height: 20 }} />
+          <div className="skeleton skeleton-line" style={{ width: '46%' }} />
+          <div className="skeleton skeleton-line" style={{ width: '88%' }} />
+          <div className="skeleton skeleton-line" style={{ width: '60%' }} />
+        </div>
+      </div>
+      <div className="skeleton skeleton-line" style={{ height: 46, marginBottom: 18 }} aria-hidden="true" />
+      <div className="skeleton skeleton-line" style={{ width: 84 }} aria-hidden="true" />
+      <div className="skeleton-grid" aria-hidden="true">{Array.from({ length: 12 }).map((_, i) => <div className="skeleton skeleton-cell" key={i} />)}</div>
+      <div className="empty" role="status"><div>正在获取线路…</div><button className="btn" style={{ maxWidth: 180, margin: '12px auto 0' }} onClick={() => nav(-1)}>取消并返回</button></div>
+    </div>
+  );
   if (!item) return (
     <div className="page page-plain">
       <div className="detail-topbar"><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={() => nav(-1)} aria-label="返回"><BackIcon /></button><button className="icon-btn" style={{ background: 'var(--bg-card)' }} onClick={goHome} aria-label="回到首页"><HomeIcon /></button></div>
@@ -167,8 +190,28 @@ export default function Detail() {
       <div className="group-title">播放来源</div>
       <div className="line-tabs">{item.variants.map((v, i) => <button key={`${v.sourceKey}:${v.vodId}`} className={`line-tab${i === sourceIdx ? ' active' : ''}`} aria-pressed={i === sourceIdx} onClick={() => { setSourceIdx(i); setLineIdx(0); }}>{v.lines.some((l) => l.direct) && <span className="dot" />}{v.sourceName}<span style={{ opacity: 0.6, marginLeft: 4 }}>{v.lines[0]?.episodes.length}集</span></button>)}</div>
       {current && current.lines.length > 1 && <><div className="group-title">同源线路</div><div className="line-tabs">{current.lines.map((l, i) => <button key={`${l.name}:${i}`} className={`line-tab${i === lineIdx ? ' active' : ''}`} aria-pressed={i === lineIdx} onClick={() => setLineIdx(i)}>{l.name} · {l.episodes.length}集</button>)}</div></>}
-      <div className="group-title">选集</div>
-      <div className="ep-grid">{line?.episodes.map((ep) => <button key={ep.index} className="ep-btn" onClick={() => startPlay(ep.index)}>{ep.name}</button>)}</div>
+      <div className="ep-tools">
+        <span className="group-title">选集{line ? ` · 共 ${line.episodes.length} 集` : ''}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          {hist && <span className="ep-note">上次看到第 {hist.episodeIndex + 1} 集</span>}
+          {line && line.episodes.length > 1 && (
+            <button type="button" className="row-action" aria-pressed={desc} onClick={() => setDesc((value) => !value)}>{desc ? '正序' : '倒序'}</button>
+          )}
+        </span>
+      </div>
+      <div className="ep-grid">
+        {(desc && line ? [...line.episodes].reverse() : line?.episodes ?? []).map((ep) => {
+          const watched = hist ? ep.index < hist.episodeIndex : false;
+          const current = hist ? ep.index === hist.episodeIndex : false;
+          return <button
+            key={ep.index}
+            className={`ep-btn${watched ? ' watched' : ''}${current ? ' current' : ''}`}
+            aria-current={current ? 'true' : undefined}
+            title={current ? '上次看到这里' : watched ? '已看过' : undefined}
+            onClick={() => startPlay(ep.index)}
+          >{ep.name}</button>;
+        })}
+      </div>
       {current?.content && <><div className="section-head"><span className="section-title">剧情简介</span><button className="expand-toggle" onClick={synopsis.toggle}>{synopsis.expanded ? '收起' : '展开全部'}</button></div><div className={`synopsis${synopsis.expanded ? ' expanded' : ''}`}>{current.content}</div></>}
       {rec && rec.key === item.key && rec.items.length > 0 && <><div className="section-head"><span className="section-title">猜你喜欢</span><span className="section-more">同类型 · 同演员</span></div><div className="grid">{rec.items.map((r) => <VodCard key={r.key} item={r} showSources={false} onClick={() => { putItems([r]); nav(`/detail/${encodeURIComponent(r.key)}?name=${encodeURIComponent(r.name)}`, { state: { item: r } }); }} />)}</div></>}
     </div>

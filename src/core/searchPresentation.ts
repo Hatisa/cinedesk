@@ -25,7 +25,7 @@ export function groupSeries(items: AggregatedItem[]): SearchEntry[] {
   const entries: SearchEntry[] = singles.map((item) => ({ kind: 'item', key: item.key, item }));
   for (const [name, members] of groups) {
     if (members.length < 2) entries.push({ kind: 'item', key: members[0].key, item: members[0] });
-    else entries.push({ kind: 'series', key: `series:${name}`, name, items: members });
+    else entries.push({ kind: 'series', key: `series:${name}`, name, items: [...members].sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0)) });
   }
   const firstPosition = new Map(items.map((item, index) => [item.key, index]));
   return entries.sort((a, b) => {
