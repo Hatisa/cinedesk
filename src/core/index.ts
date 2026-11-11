@@ -22,3 +22,4 @@ export * from './discover';
 export * from './progress';
 export * from './native';
 export * from './ui';
+export * from './episodeGrid';

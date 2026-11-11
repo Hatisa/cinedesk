@@ -931,6 +931,7 @@ img {
 
 .ep-grid {
   display: grid;
+  /* JS 会按标题实测宽度写入 inline 的 grid-template-columns；这里只做首帧兜底 */
   grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
   gap: 8px;
 }
@@ -938,17 +939,23 @@ img {
 /*
  * 选集按钮。高度 40px 略高于最小值，是因为长剧集动辄上百个，
  * 密集排布时手指容易点错相邻集。
+ *
+ * 标题不截断：综艺/动画的剧集名常有十几个字（「第20260626期下」），
+ * 省略号会让用户分不清是哪一期。列数由 EpisodeGrid 按标题宽度自适应，
+ * 少数超长标题在按钮内换行，行高随内容增长，同一行的按钮照旧等高对齐。
  */
 .ep-btn {
-  height: 40px;
+  display: grid;
+  place-items: center;
+  min-height: 40px;
   border-radius: var(--radius-sm);
   background: var(--bg-soft);
   border: 1px solid var(--line);
   font-size: 12.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 6px;
+  line-height: 1.16;
+  padding: 5px 6px;
+  text-align: center;
+  overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
   transition: transform 0.14s var(--ease), background 0.16s var(--ease);
 }

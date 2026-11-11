@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import Player from '../components/Player';
+import EpisodeGrid from '../components/EpisodeGrid';
 import { useToast } from '../components/Toast';
 import {
   failureKey,
@@ -242,13 +243,13 @@ export default function Play() {
         {epTotal > 1 ? (
           <>
             <div className="ep-head"><span className="group-title" style={{ margin: 0 }}>选集</span><span className="ep-count">{selection.epIdx + 1} / {epTotal}</span></div>
-            <div className="ep-grid">
+            <EpisodeGrid names={line?.episodes.map((ep) => ep.name) ?? []}>
               {line?.episodes.map((ep) => (
                 <button key={ep.index} ref={ep.index === selection.epIdx ? activeEpRef : undefined}
                   className={`ep-btn${ep.index === selection.epIdx ? ' active' : ''}`}
                   onClick={() => changeSelection({ ...selection, epIdx: ep.index })} aria-current={ep.index === selection.epIdx ? 'true' : undefined}>{ep.name}</button>
               ))}
-            </div>
+            </EpisodeGrid>
           </>
         ) : <div className="hint">该来源只提供了 1 个可直接播放的地址。</div>}
         {failed.size > 0 && <button className="btn" style={{ marginTop: 14 }} onClick={() => { setFailed(new Set()); setRetryKey((n) => n + 1); }}>清除失败标记，重试当前线路</button>}

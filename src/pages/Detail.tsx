@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import VodCard from '../components/VodCard';
+import EpisodeGrid from '../components/EpisodeGrid';
 import PosterImage from '../components/PosterImage';
 import { useExpandable } from '../components/Expandable';
 import { useToast } from '../components/Toast';
@@ -123,6 +124,7 @@ export default function Detail() {
   );
 
   const fav = current ? isFavorite({ key: item.key, sourceKey: current.sourceKey, vodId: current.vodId }) : false;
+  const episodes = desc && line ? [...line.episodes].reverse() : line?.episodes ?? [];
   const startPlay = (ep: number, resume?: HistoryEntry) => {
     const selection = { variantIdx: sourceIdx, lineIdx, epIdx: Math.min(ep, Math.max(0, (line?.episodes.length ?? 1) - 1)) };
     nav(playPath(item, selection), { state: { item, resumeAt: resume?.position ?? 0 } });
@@ -199,8 +201,8 @@ export default function Detail() {
           )}
         </span>
       </div>
-      <div className="ep-grid">
-        {(desc && line ? [...line.episodes].reverse() : line?.episodes ?? []).map((ep) => {
+      <EpisodeGrid names={episodes.map((ep) => ep.name)}>
+        {episodes.map((ep) => {
           const watched = hist ? ep.index < hist.episodeIndex : false;
           const current = hist ? ep.index === hist.episodeIndex : false;
           return <button
@@ -211,7 +213,7 @@ export default function Detail() {
             onClick={() => startPlay(ep.index)}
           >{ep.name}</button>;
         })}
-      </div>
+      </EpisodeGrid>
       {current?.content && <><div className="section-head"><span className="section-title">剧情简介</span><button className="expand-toggle" onClick={synopsis.toggle}>{synopsis.expanded ? '收起' : '展开全部'}</button></div><div className={`synopsis${synopsis.expanded ? ' expanded' : ''}`}>{current.content}</div></>}
       {rec && rec.key === item.key && rec.items.length > 0 && <><div className="section-head"><span className="section-title">猜你喜欢</span><span className="section-more">同类型 · 同演员</span></div><div className="grid">{rec.items.map((r) => <VodCard key={r.key} item={r} showSources={false} onClick={() => { putItems([r]); nav(`/detail/${encodeURIComponent(r.key)}?name=${encodeURIComponent(r.name)}`, { state: { item: r } }); }} />)}</div></>}
     </div>
